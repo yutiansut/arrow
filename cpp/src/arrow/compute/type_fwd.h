@@ -17,22 +17,21 @@
 
 #pragma once
 
-#include <memory>
-
-#include "arrow/type_fwd.h"
-
 namespace arrow {
+
+struct Datum;
+
 namespace compute {
 
-class Expr;
-class LogicalType;
-class Operation;
+struct CastOptions;
 
-using ArrowTypePtr = std::shared_ptr<::arrow::DataType>;
-using ExprPtr = std::shared_ptr<Expr>;
-using ConstOpPtr = std::shared_ptr<const Operation>;
-using OpPtr = std::shared_ptr<Operation>;
-using LogicalTypePtr = std::shared_ptr<LogicalType>;
+class ExecContext;
+class KernelContext;
+
+struct Kernel;
+struct ScalarKernel;
+struct ScalarAggregateKernel;
+struct VectorKernel;
 
 }  // namespace compute
 }  // namespace arrow

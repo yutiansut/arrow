@@ -26,33 +26,60 @@ arrow_install_all_headers("arrow/util")
 # arrow_test_main
 #
 
-add_arrow_test(bit-util-test)
-add_arrow_test(checked-cast-test)
-add_arrow_test(compression-test)
-add_arrow_test(concatenate-test)
-add_arrow_test(decimal-test)
-add_arrow_test(hashing-test)
-add_arrow_test(int-util-test)
-add_arrow_test(key-value-metadata-test)
-add_arrow_test(lazy-test)
-add_arrow_test(logging-test)
-add_arrow_test(parsing-util-test)
-add_arrow_test(rle-encoding-test)
-add_arrow_test(stl-util-test)
-add_arrow_test(task-group-test)
-add_arrow_test(thread-pool-test)
-add_arrow_test(trie-test)
-add_arrow_test(uri-test)
-add_arrow_test(utf8-util-test)
+if(WIN32)
+  # This manifest enables long file paths on Windows 10+
+  # See https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file#enable-long-paths-in-windows-10-version-1607-and-later
+  if(MSVC)
+    set(IO_UTIL_TEST_SOURCES io_util_test.cc io_util_test.manifest)
+  else()
+    set(IO_UTIL_TEST_SOURCES io_util_test.cc io_util_test.rc)
+  endif()
+else()
+  set(IO_UTIL_TEST_SOURCES io_util_test.cc)
+endif()
 
-add_arrow_benchmark(bit-util-benchmark)
-add_arrow_benchmark(compression-benchmark)
-add_arrow_benchmark(decimal-benchmark)
-add_arrow_benchmark(hashing-benchmark)
-add_arrow_benchmark(int-util-benchmark)
-add_arrow_benchmark(lazy-benchmark)
-add_arrow_benchmark(machine-benchmark)
-add_arrow_benchmark(number-parsing-benchmark)
-add_arrow_benchmark(thread-pool-benchmark)
-add_arrow_benchmark(trie-benchmark)
-add_arrow_benchmark(utf8-util-benchmark)
+add_arrow_test(utility-test
+               SOURCES
+               align_util_test.cc
+               bit_block_counter_test.cc
+               bit_util_test.cc
+               checked_cast_test.cc
+               compression_test.cc
+               decimal_test.cc
+               formatting_util_test.cc
+               key_value_metadata_test.cc
+               hashing_test.cc
+               int_util_test.cc
+               ${IO_UTIL_TEST_SOURCES}
+               iterator_test.cc
+               logging_test.cc
+               range_test.cc
+               rle_encoding_test.cc
+               stl_util_test.cc
+               string_test.cc
+               time_test.cc
+               trie_test.cc
+               uri_test.cc
+               utf8_util_test.cc
+               value_parsing_test.cc
+               variant_test.cc)
+
+add_arrow_test(threading-utility-test
+               SOURCES
+               future_test
+               task_group_test
+               thread_pool_test)
+
+add_arrow_benchmark(bit_block_counter_benchmark)
+add_arrow_benchmark(bit_util_benchmark)
+add_arrow_benchmark(compression_benchmark)
+add_arrow_benchmark(decimal_benchmark)
+add_arrow_benchmark(hashing_benchmark)
+add_arrow_benchmark(int_util_benchmark)
+add_arrow_benchmark(machine_benchmark)
+add_arrow_benchmark(range_benchmark)
+add_arrow_benchmark(thread_pool_benchmark)
+add_arrow_benchmark(trie_benchmark)
+add_arrow_benchmark(utf8_util_benchmark)
+add_arrow_benchmark(value_parsing_benchmark)
+add_arrow_benchmark(variant_benchmark)

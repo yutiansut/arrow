@@ -49,7 +49,7 @@ rm -f ${tar_gz}
 curl \
   --remote-name \
   --fail \
-  https://www-us.apache.org/dist/arrow/arrow-${version}/${tar_gz}
+  https://downloads.apache.org/arrow/arrow-${version}/${tar_gz}
 rm -rf ${archive_name}
 tar xf ${tar_gz}
 modules=()
@@ -69,6 +69,6 @@ if [ "${INSTALL_RUST}" == "yes" ]; then
 fi
 
 echo "Success! The released packages are available here:"
-for module in ${modules}; do
+for module in ${modules[@]}; do
   echo "  https://crates.io/crates/${module}/${version}"
 done

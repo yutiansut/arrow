@@ -17,6 +17,8 @@
 
 package org.apache.arrow.vector;
 
+import static org.apache.arrow.vector.NullCheckingForGet.NULL_CHECKING_ENABLED;
+
 import java.time.LocalDateTime;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -25,6 +27,7 @@ import org.apache.arrow.vector.complex.reader.FieldReader;
 import org.apache.arrow.vector.holders.NullableTimeStampMilliHolder;
 import org.apache.arrow.vector.holders.TimeStampMilliHolder;
 import org.apache.arrow.vector.types.Types.MinorType;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.util.DateUtility;
 import org.apache.arrow.vector.util.TransferPair;
@@ -34,7 +37,7 @@ import org.apache.arrow.vector.util.TransferPair;
  * timestamp (millisecond resolution) values which could be null. A validity buffer
  * (bit vector) is maintained to track which elements in the vector are null.
  */
-public class TimeStampMilliVector extends TimeStampVector {
+public final class TimeStampMilliVector extends TimeStampVector {
   private final FieldReader reader;
 
   /**
@@ -58,6 +61,18 @@ public class TimeStampMilliVector extends TimeStampVector {
    */
   public TimeStampMilliVector(String name, FieldType fieldType, BufferAllocator allocator) {
     super(name, fieldType, allocator);
+    reader = new TimeStampMilliReaderImpl(TimeStampMilliVector.this);
+  }
+
+  /**
+   * Instantiate a TimeStampMilliVector. This doesn't allocate any memory for
+   * the data in vector.
+   *
+   * @param field field materialized by this vector
+   * @param allocator allocator for memory management.
+   */
+  public TimeStampMilliVector(Field field, BufferAllocator allocator) {
+    super(field, allocator);
     reader = new TimeStampMilliReaderImpl(TimeStampMilliVector.this);
   }
 
@@ -98,12 +113,12 @@ public class TimeStampMilliVector extends TimeStampVector {
    * @param index   position of element
    */
   public void get(int index, NullableTimeStampMilliHolder holder) {
-    if (isSet(index) == 0) {
+    if (NULL_CHECKING_ENABLED && isSet(index) == 0) {
       holder.isSet = 0;
       return;
     }
     holder.isSet = 1;
-    holder.value = valueBuffer.getLong(index * TYPE_WIDTH);
+    holder.value = valueBuffer.getLong((long) index * TYPE_WIDTH);
   }
 
   /**
@@ -116,7 +131,7 @@ public class TimeStampMilliVector extends TimeStampVector {
     if (isSet(index) == 0) {
       return null;
     } else {
-      final long millis = valueBuffer.getLong(index * TYPE_WIDTH);
+      final long millis = valueBuffer.getLong((long) index * TYPE_WIDTH);
       return DateUtility.getLocalDateTimeFromEpochMilli(millis);
     }
   }
@@ -141,10 +156,10 @@ public class TimeStampMilliVector extends TimeStampVector {
     if (holder.isSet < 0) {
       throw new IllegalArgumentException();
     } else if (holder.isSet > 0) {
-      BitVectorHelper.setValidityBitToOne(validityBuffer, index);
+      BitVectorHelper.setBit(validityBuffer, index);
       setValue(index, holder.value);
     } else {
-      BitVectorHelper.setValidityBit(validityBuffer, index, 0);
+      BitVectorHelper.unsetBit(validityBuffer, index);
     }
   }
 
@@ -155,7 +170,7 @@ public class TimeStampMilliVector extends TimeStampVector {
    * @param holder  data holder for value of element
    */
   public void set(int index, TimeStampMilliHolder holder) {
-    BitVectorHelper.setValidityBitToOne(validityBuffer, index);
+    BitVectorHelper.setBit(validityBuffer, index);
     setValue(index, holder.value);
   }
 
@@ -194,7 +209,7 @@ public class TimeStampMilliVector extends TimeStampVector {
 
 
   /**
-   * Construct a TransferPair comprising of this and and a target vector of
+   * Construct a TransferPair comprising of this and a target vector of
    * the same type.
    *
    * @param ref name of the target vector

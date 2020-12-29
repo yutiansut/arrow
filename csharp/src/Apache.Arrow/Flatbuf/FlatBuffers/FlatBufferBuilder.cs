@@ -63,7 +63,7 @@ namespace FlatBuffers
         }
 
         /// <summary>
-        /// Create a FlatBufferBuilder backed by the pased in ByteBuffer
+        /// Create a FlatBufferBuilder backed by the passed in ByteBuffer
         /// </summary>
         /// <param name="buffer">The ByteBuffer to write to</param>
         public FlatBufferBuilder(ByteBuffer buffer)
@@ -387,7 +387,7 @@ namespace FlatBuffers
             return EndVector();
         }
 
-        /// @cond FLATBUFFERS_INTENRAL
+        /// @cond FLATBUFFERS_INTERNAL
         public void Nested(int obj)
         {
             // Structs are always stored inline, so need to be created right

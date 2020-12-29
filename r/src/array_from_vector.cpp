@@ -15,90 +15,334 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <memory>
+
 #include "./arrow_types.h"
+#include "./arrow_vctrs.h"
+
+#if defined(ARROW_R_WITH_ARROW)
+#include <arrow/array/array_base.h>
+#include <arrow/builder.h>
+#include <arrow/chunked_array.h>
+#include <arrow/util/bitmap_writer.h>
+#include <arrow/visitor_inline.h>
+
+using arrow::internal::checked_cast;
 
 namespace arrow {
 namespace r {
 
-std::shared_ptr<Array> MakeStringArray(Rcpp::StringVector_ vec) {
-  R_xlen_t n = vec.size();
-
-  std::shared_ptr<Buffer> null_buffer;
-  std::shared_ptr<Buffer> offset_buffer;
-  std::shared_ptr<Buffer> value_buffer;
-
-  // there is always an offset buffer
-  STOP_IF_NOT_OK(AllocateBuffer((n + 1) * sizeof(int32_t), &offset_buffer));
-
-  R_xlen_t i = 0;
-  int current_offset = 0;
-  int64_t null_count = 0;
-  auto p_offset = reinterpret_cast<int32_t*>(offset_buffer->mutable_data());
-  *p_offset = 0;
-  for (++p_offset; i < n; i++, ++p_offset) {
-    SEXP s = STRING_ELT(vec, i);
-    if (s == NA_STRING) {
-      // break as we are going to need a null_bitmap buffer
-      break;
-    }
-
-    *p_offset = current_offset += LENGTH(s);
-  }
-
-  if (i < n) {
-    STOP_IF_NOT_OK(AllocateBuffer(BitUtil::BytesForBits(n), &null_buffer));
-    internal::FirstTimeBitmapWriter null_bitmap_writer(null_buffer->mutable_data(), 0, n);
-
-    // catch up
-    for (R_xlen_t j = 0; j < i; j++, null_bitmap_writer.Next()) {
-      null_bitmap_writer.Set();
-    }
-
-    // resume offset filling
-    for (; i < n; i++, ++p_offset, null_bitmap_writer.Next()) {
-      SEXP s = STRING_ELT(vec, i);
-      if (s == NA_STRING) {
-        null_bitmap_writer.Clear();
-        *p_offset = current_offset;
-        null_count++;
-      } else {
-        null_bitmap_writer.Set();
-        *p_offset = current_offset += LENGTH(s);
-      }
-    }
-
-    null_bitmap_writer.Finish();
-  }
-
-  // ----- data buffer
-  if (current_offset > 0) {
-    STOP_IF_NOT_OK(AllocateBuffer(current_offset, &value_buffer));
-    p_offset = reinterpret_cast<int32_t*>(offset_buffer->mutable_data());
-    auto p_data = reinterpret_cast<char*>(value_buffer->mutable_data());
-
-    for (R_xlen_t i = 0; i < n; i++) {
-      SEXP s = STRING_ELT(vec, i);
-      if (s != NA_STRING) {
-        auto ni = LENGTH(s);
-        std::copy_n(CHAR(s), ni, p_data);
-        p_data += ni;
-      }
-    }
-  }
-
-  auto data = ArrayData::Make(arrow::utf8(), n,
-                              {null_buffer, offset_buffer, value_buffer}, null_count, 0);
-  return MakeArray(data);
+template <typename T>
+inline bool is_na(T value) {
+  return false;
 }
 
+template <>
+inline bool is_na<int64_t>(int64_t value) {
+  return value == NA_INT64;
+}
+
+template <>
+inline bool is_na<double>(double value) {
+  return ISNA(value);
+}
+
+template <>
+inline bool is_na<int>(int value) {
+  return value == NA_INTEGER;
+}
+
+struct VectorToArrayConverter {
+  Status Visit(const arrow::NullType& type) {
+    auto* null_builder = checked_cast<NullBuilder*>(builder);
+    return null_builder->AppendNulls(XLENGTH(x));
+  }
+
+  Status Visit(const arrow::BooleanType& type) {
+    ARROW_RETURN_IF(TYPEOF(x) != LGLSXP, Status::RError("Expecting a logical vector"));
+    R_xlen_t n = XLENGTH(x);
+
+    auto* bool_builder = checked_cast<BooleanBuilder*>(builder);
+    auto* p = LOGICAL(x);
+
+    RETURN_NOT_OK(bool_builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      auto value = p[i];
+      if (value == NA_LOGICAL) {
+        bool_builder->UnsafeAppendNull();
+      } else {
+        bool_builder->UnsafeAppend(value == 1);
+      }
+    }
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::Int32Type& type) {
+    ARROW_RETURN_IF(TYPEOF(x) != INTSXP, Status::RError("Expecting an integer vector"));
+
+    auto* int_builder = checked_cast<Int32Builder*>(builder);
+
+    R_xlen_t n = XLENGTH(x);
+    const auto* data = INTEGER(x);
+
+    RETURN_NOT_OK(int_builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      const auto value = data[i];
+      if (value == NA_INTEGER) {
+        int_builder->UnsafeAppendNull();
+      } else {
+        int_builder->UnsafeAppend(value);
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::Int64Type& type) {
+    ARROW_RETURN_IF(TYPEOF(x) != REALSXP, Status::RError("Expecting a numeric vector"));
+    ARROW_RETURN_IF(Rf_inherits(x, "integer64"),
+                    Status::RError("Expecting a vector that inherits integer64"));
+
+    auto* int_builder = checked_cast<Int64Builder*>(builder);
+
+    R_xlen_t n = XLENGTH(x);
+    const auto* data = (REAL(x));
+
+    RETURN_NOT_OK(int_builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      const auto value = arrow::util::SafeCopy<int64_t>(data[i]);
+      if (value == NA_INT64) {
+        int_builder->UnsafeAppendNull();
+      } else {
+        int_builder->UnsafeAppend(value);
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::DoubleType& type) {
+    ARROW_RETURN_IF(TYPEOF(x) != REALSXP, Status::RError("Expecting a numeric vector"));
+
+    auto* double_builder = checked_cast<DoubleBuilder*>(builder);
+
+    R_xlen_t n = XLENGTH(x);
+    const auto* data = (REAL(x));
+
+    RETURN_NOT_OK(double_builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      const auto value = data[i];
+      if (ISNA(value)) {
+        double_builder->UnsafeAppendNull();
+      } else {
+        double_builder->UnsafeAppend(value);
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::BinaryType& type) {
+    if (!(Rf_inherits(x, "vctrs_list_of") &&
+          TYPEOF(Rf_getAttrib(x, symbols::ptype)) == RAWSXP)) {
+      return Status::RError("Expecting a list of raw vectors");
+    }
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::FixedSizeBinaryType& type) {
+    if (!(Rf_inherits(x, "vctrs_list_of") &&
+          TYPEOF(Rf_getAttrib(x, symbols::ptype)) == RAWSXP)) {
+      return Status::RError("Expecting a list of raw vectors");
+    }
+
+    return Status::OK();
+  }
+
+  template <typename T>
+  arrow::enable_if_base_binary<T, Status> Visit(const T& type) {
+    using BuilderType = typename TypeTraits<T>::BuilderType;
+
+    ARROW_RETURN_IF(TYPEOF(x) != STRSXP, Status::RError("Expecting a character vector"));
+
+    auto* binary_builder = checked_cast<BuilderType*>(builder);
+
+    R_xlen_t n = XLENGTH(x);
+    RETURN_NOT_OK(builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP si = STRING_ELT(x, i);
+      if (si == NA_STRING) {
+        RETURN_NOT_OK(binary_builder->AppendNull());
+        continue;
+      }
+      std::string s = cpp11::r_string(si);
+      RETURN_NOT_OK(binary_builder->Append(s.c_str(), s.size()));
+    }
+
+    return Status::OK();
+  }
+
+  template <typename T>
+  arrow::enable_if_base_list<T, Status> Visit(const T& type) {
+    using BuilderType = typename TypeTraits<T>::BuilderType;
+
+    ARROW_RETURN_IF(TYPEOF(x) != VECSXP, Status::RError("Expecting a list vector"));
+
+    auto* list_builder = checked_cast<BuilderType*>(builder);
+    auto* value_builder = list_builder->value_builder();
+    auto value_type = type.value_type();
+
+    R_xlen_t n = XLENGTH(x);
+    RETURN_NOT_OK(builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP vector = VECTOR_ELT(x, i);
+      if (Rf_isNull(vector)) {
+        RETURN_NOT_OK(list_builder->AppendNull());
+        continue;
+      }
+
+      RETURN_NOT_OK(list_builder->Append());
+
+      // Recurse.
+      VectorToArrayConverter converter{vector, value_builder};
+      Status status = arrow::VisitTypeInline(*value_type, &converter);
+      if (!status.ok()) {
+        return Status::RError("Cannot convert list element ", (i + 1),
+                              " to an Array of type `", value_type->ToString(),
+                              "` : ", status.message());
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status Visit(const FixedSizeListType& type) {
+    ARROW_RETURN_IF(TYPEOF(x) != VECSXP, Status::RError("Expecting a list vector"));
+
+    auto* fixed_size_list_builder = checked_cast<FixedSizeListBuilder*>(builder);
+    auto* value_builder = fixed_size_list_builder->value_builder();
+    auto value_type = type.value_type();
+    int list_size = type.list_size();
+
+    R_xlen_t n = XLENGTH(x);
+    RETURN_NOT_OK(builder->Reserve(n));
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP vector = VECTOR_ELT(x, i);
+      if (Rf_isNull(vector)) {
+        RETURN_NOT_OK(fixed_size_list_builder->AppendNull());
+        continue;
+      }
+      RETURN_NOT_OK(fixed_size_list_builder->Append());
+
+      auto vect_type = arrow::r::InferArrowType(vector);
+      if (!value_type->Equals(vect_type)) {
+        return Status::RError("FixedSizeList vector expecting elements vector of type ",
+                              value_type->ToString(), " but got ", vect_type->ToString());
+      }
+      int vector_size = vctrs::short_vec_size(vector);
+      if (vector_size != list_size) {
+        return Status::RError("FixedSizeList vector expecting elements vector of size ",
+                              list_size, ", not ", vector_size);
+      }
+
+      // Recurse.
+      VectorToArrayConverter converter{vector, value_builder};
+      RETURN_NOT_OK(arrow::VisitTypeInline(*value_type, &converter));
+    }
+
+    return Status::OK();
+  }
+
+  template <typename T>
+  arrow::enable_if_t<is_struct_type<T>::value, Status> Visit(const T& type) {
+    using BuilderType = typename TypeTraits<T>::BuilderType;
+    ARROW_RETURN_IF(!Rf_inherits(x, "data.frame"),
+                    Status::RError("Expecting a data frame"));
+
+    auto* struct_builder = checked_cast<BuilderType*>(builder);
+
+    int64_t n = vctrs::short_vec_size(x);
+    RETURN_NOT_OK(struct_builder->Reserve(n));
+    RETURN_NOT_OK(struct_builder->AppendValues(n, NULLPTR));
+
+    int num_fields = struct_builder->num_fields();
+
+    // Visit each column of the data frame using the associated
+    // field builder
+    for (R_xlen_t i = 0; i < num_fields; i++) {
+      auto column_builder = struct_builder->field_builder(i);
+      SEXP x_i = VECTOR_ELT(x, i);
+      int64_t n_i = vctrs::short_vec_size(x_i);
+      if (n_i != n) {
+        SEXP name_i = STRING_ELT(Rf_getAttrib(x, R_NamesSymbol), i);
+        return Status::RError("Degenerated data frame. Column '", CHAR(name_i),
+                              "' has size ", n_i, " instead of the number of rows: ", n);
+      }
+
+      VectorToArrayConverter converter{x_i, column_builder};
+      RETURN_NOT_OK(arrow::VisitTypeInline(*column_builder->type().get(), &converter));
+    }
+
+    return Status::OK();
+  }
+
+  template <typename T>
+  arrow::enable_if_t<std::is_same<DictionaryType, T>::value, Status> Visit(
+      const T& type) {
+    // TODO: perhaps this replaces MakeFactorArrayImpl ?
+
+    ARROW_RETURN_IF(!Rf_isFactor(x), Status::RError("Expecting a factor"));
+    int64_t n = vctrs::short_vec_size(x);
+
+    auto* dict_builder = checked_cast<StringDictionaryBuilder*>(builder);
+    RETURN_NOT_OK(dict_builder->Reserve(n));
+
+    SEXP levels = Rf_getAttrib(x, R_LevelsSymbol);
+    auto memo = VectorToArrayConverter::Visit(levels, utf8());
+    RETURN_NOT_OK(dict_builder->InsertMemoValues(*memo));
+
+    int* p_values = INTEGER(x);
+    for (int64_t i = 0; i < n; i++, ++p_values) {
+      int v = *p_values;
+      if (v == NA_INTEGER) {
+        RETURN_NOT_OK(dict_builder->AppendNull());
+      } else {
+        RETURN_NOT_OK(dict_builder->Append(CHAR(STRING_ELT(levels, v - 1))));
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status Visit(const arrow::DataType& type) {
+    return Status::NotImplemented("Converting vector to arrow type ", type.ToString(),
+                                  " not implemented");
+  }
+
+  static std::shared_ptr<Array> Visit(SEXP x, const std::shared_ptr<DataType>& type) {
+    std::unique_ptr<ArrayBuilder> builder;
+    StopIfNotOk(MakeBuilder(gc_memory_pool(), type, &builder));
+
+    VectorToArrayConverter converter{x, builder.get()};
+    StopIfNotOk(arrow::VisitTypeInline(*type, &converter));
+
+    std::shared_ptr<Array> result;
+    StopIfNotOk(builder->Finish(&result));
+    return result;
+  }
+
+  SEXP x;
+  arrow::ArrayBuilder* builder;
+};
+
 template <typename Type>
-std::shared_ptr<Array> MakeFactorArrayImpl(Rcpp::IntegerVector_ factor,
+std::shared_ptr<Array> MakeFactorArrayImpl(cpp11::integers factor,
                                            const std::shared_ptr<arrow::DataType>& type) {
   using value_type = typename arrow::TypeTraits<Type>::ArrayType::value_type;
   auto n = factor.size();
 
-  std::shared_ptr<Buffer> indices_buffer;
-  STOP_IF_NOT_OK(AllocateBuffer(n * sizeof(value_type), &indices_buffer));
+  std::shared_ptr<Buffer> indices_buffer =
+      ValueOrStop(AllocateBuffer(n * sizeof(value_type), gc_memory_pool()));
 
   std::vector<std::shared_ptr<Buffer>> buffers{nullptr, indices_buffer};
 
@@ -113,8 +357,8 @@ std::shared_ptr<Array> MakeFactorArrayImpl(Rcpp::IntegerVector_ factor,
 
   if (i < n) {
     // there are NA's so we need a null buffer
-    std::shared_ptr<Buffer> null_buffer;
-    STOP_IF_NOT_OK(AllocateBuffer(BitUtil::BytesForBits(n), &null_buffer));
+    auto null_buffer =
+        ValueOrStop(AllocateBuffer(BitUtil::BytesForBits(n), gc_memory_pool()));
     internal::FirstTimeBitmapWriter null_bitmap_writer(null_buffer->mutable_data(), 0, n);
 
     // catch up
@@ -141,22 +385,41 @@ std::shared_ptr<Array> MakeFactorArrayImpl(Rcpp::IntegerVector_ factor,
       ArrayData::Make(std::make_shared<Type>(), n, std::move(buffers), null_count, 0);
   auto array_indices = MakeArray(array_indices_data);
 
-  std::shared_ptr<Array> out;
-  STOP_IF_NOT_OK(DictionaryArray::FromArrays(type, array_indices, &out));
-  return out;
+  SEXP levels = Rf_getAttrib(factor, R_LevelsSymbol);
+  auto dict = VectorToArrayConverter::Visit(levels, utf8());
+
+  return ValueOrStop(DictionaryArray::FromArrays(type, array_indices, dict));
 }
 
-std::shared_ptr<Array> MakeFactorArray(Rcpp::IntegerVector_ factor,
+std::shared_ptr<Array> MakeFactorArray(cpp11::integers factor,
                                        const std::shared_ptr<arrow::DataType>& type) {
-  SEXP levels = factor.attr("levels");
-  int n = Rf_length(levels);
-  if (n < 128) {
-    return MakeFactorArrayImpl<arrow::Int8Type>(factor, type);
-  } else if (n < 32768) {
-    return MakeFactorArrayImpl<arrow::Int16Type>(factor, type);
-  } else {
-    return MakeFactorArrayImpl<arrow::Int32Type>(factor, type);
+  const auto& dict_type = checked_cast<const arrow::DictionaryType&>(*type);
+  switch (dict_type.index_type()->id()) {
+    case Type::INT8:
+      return MakeFactorArrayImpl<arrow::Int8Type>(factor, type);
+    case Type::INT16:
+      return MakeFactorArrayImpl<arrow::Int16Type>(factor, type);
+    case Type::INT32:
+      return MakeFactorArrayImpl<arrow::Int32Type>(factor, type);
+    case Type::INT64:
+      return MakeFactorArrayImpl<arrow::Int64Type>(factor, type);
+    default:
+      break;
   }
+
+  cpp11::stop("Cannot convert to dictionary with index_type '%s'",
+              dict_type.index_type()->ToString().c_str());
+}
+
+std::shared_ptr<Array> MakeStructArray(SEXP df, const std::shared_ptr<DataType>& type) {
+  int n = type->num_fields();
+  std::vector<std::shared_ptr<Array>> children(n);
+  for (int i = 0; i < n; i++) {
+    children[i] = Array__from_vector(VECTOR_ELT(df, i), type->field(i)->type(), true);
+  }
+
+  int64_t rows = n ? children[0]->length() : 0;
+  return std::make_shared<StructArray>(type, rows, children);
 }
 
 template <typename T>
@@ -178,14 +441,14 @@ inline int64_t time_cast<double>(double value) {
 // ---------------- new api
 
 namespace arrow {
-using internal::checked_cast;
 
 namespace internal {
 
 template <typename T, typename Target,
           typename std::enable_if<std::is_signed<Target>::value, Target>::type = 0>
 Status int_cast(T x, Target* out) {
-  if (x < std::numeric_limits<Target>::min() || x > std::numeric_limits<Target>::max()) {
+  if (static_cast<int64_t>(x) < std::numeric_limits<Target>::min() ||
+      static_cast<int64_t>(x) > std::numeric_limits<Target>::max()) {
     return Status::Invalid("Value is too large to fit in C integer type");
   }
   *out = static_cast<Target>(x);
@@ -267,14 +530,34 @@ class VectorConverter {
   virtual Status Ingest(SEXP obj) = 0;
 
   virtual Status GetResult(std::shared_ptr<arrow::Array>* result) {
-    RETURN_NOT_OK(builder_->Finish(result));
-    return Status::OK();
+    return builder_->Finish(result);
   }
 
   ArrayBuilder* builder() const { return builder_; }
 
  protected:
   ArrayBuilder* builder_;
+};
+
+class NullVectorConverter : public VectorConverter {
+ public:
+  using BuilderType = NullBuilder;
+
+  ~NullVectorConverter() {}
+
+  Status Init(ArrayBuilder* builder) override {
+    builder_ = builder;
+    typed_builder_ = checked_cast<BuilderType*>(builder_);
+    return Status::OK();
+  }
+
+  Status Ingest(SEXP obj) override {
+    RETURN_NOT_OK(typed_builder_->AppendNulls(XLENGTH(obj)));
+    return Status::OK();
+  }
+
+ protected:
+  BuilderType* typed_builder_;
 };
 
 template <typename Type, typename Enable = void>
@@ -290,27 +573,28 @@ struct Unbox<Type, enable_if_integer<Type>> {
   static inline Status Ingest(BuilderType* builder, SEXP obj) {
     switch (TYPEOF(obj)) {
       case INTSXP:
-        return IngestRange<int>(builder, INTEGER(obj), XLENGTH(obj), NA_INTEGER);
+        return IngestRange<int>(builder, INTEGER(obj), XLENGTH(obj));
       case REALSXP:
         if (Rf_inherits(obj, "integer64")) {
           return IngestRange<int64_t>(builder, reinterpret_cast<int64_t*>(REAL(obj)),
-                                      XLENGTH(obj), NA_INT64);
+                                      XLENGTH(obj));
         }
-      // TODO: handle aw and logical
+        return IngestRange(builder, REAL(obj), XLENGTH(obj));
+
+      // TODO: handle raw and logical
       default:
         break;
     }
 
-    return Status::Invalid(
-        tfm::format("Cannot convert R vector of type %s to integer Arrow array",
-                    Rcpp::type2name(obj)));
+    return Status::Invalid("Cannot convert R vector of type <", Rf_type2char(TYPEOF(obj)),
+                           "> to integer Arrow array");
   }
 
   template <typename T>
-  static inline Status IngestRange(BuilderType* builder, T* p, R_xlen_t n, T na) {
+  static inline Status IngestRange(BuilderType* builder, T* p, R_xlen_t n) {
     RETURN_NOT_OK(builder->Resize(n));
     for (R_xlen_t i = 0; i < n; i++, ++p) {
-      if (*p == na) {
+      if (is_na<T>(*p)) {
         builder->UnsafeAppendNull();
       } else {
         CType value = 0;
@@ -346,7 +630,7 @@ struct Unbox<DoubleType> {
       if (*p == NA_INTEGER) {
         builder->UnsafeAppendNull();
       } else {
-        double value;
+        double value = 0;
         RETURN_NOT_OK(internal::double_cast(*p, &value));
         builder->UnsafeAppend(value);
       }
@@ -686,6 +970,144 @@ class Time64Converter : public TimeConverter<Time64Type> {
   }
 };
 
+template <typename Builder>
+class BinaryVectorConverter : public VectorConverter {
+ public:
+  ~BinaryVectorConverter() {}
+
+  Status Init(ArrayBuilder* builder) {
+    typed_builder_ = checked_cast<Builder*>(builder);
+    return Status::OK();
+  }
+
+  Status Ingest(SEXP obj) {
+    ARROW_RETURN_IF(TYPEOF(obj) != VECSXP, Status::RError("Expecting a list"));
+    R_xlen_t n = XLENGTH(obj);
+
+    // Reserve enough space before appending
+    int64_t size = 0;
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP obj_i = VECTOR_ELT(obj, i);
+      if (!Rf_isNull(obj_i)) {
+        ARROW_RETURN_IF(TYPEOF(obj_i) != RAWSXP,
+                        Status::RError("Expecting a raw vector"));
+        size += XLENGTH(obj_i);
+      }
+    }
+    RETURN_NOT_OK(typed_builder_->Reserve(size));
+
+    // append
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP obj_i = VECTOR_ELT(obj, i);
+      if (Rf_isNull(obj_i)) {
+        RETURN_NOT_OK(typed_builder_->AppendNull());
+      } else {
+        RETURN_NOT_OK(typed_builder_->Append(RAW(obj_i), XLENGTH(obj_i)));
+      }
+    }
+    return Status::OK();
+  }
+
+  Status GetResult(std::shared_ptr<arrow::Array>* result) {
+    return typed_builder_->Finish(result);
+  }
+
+ private:
+  Builder* typed_builder_;
+};
+
+class FixedSizeBinaryVectorConverter : public VectorConverter {
+ public:
+  ~FixedSizeBinaryVectorConverter() {}
+
+  Status Init(ArrayBuilder* builder) {
+    typed_builder_ = checked_cast<FixedSizeBinaryBuilder*>(builder);
+    return Status::OK();
+  }
+
+  Status Ingest(SEXP obj) {
+    ARROW_RETURN_IF(TYPEOF(obj) != VECSXP, Status::RError("Expecting a list"));
+    R_xlen_t n = XLENGTH(obj);
+
+    // Reserve enough space before appending
+    int32_t byte_width = typed_builder_->byte_width();
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP obj_i = VECTOR_ELT(obj, i);
+      if (!Rf_isNull(obj_i)) {
+        ARROW_RETURN_IF(TYPEOF(obj_i) != RAWSXP,
+                        Status::RError("Expecting a raw vector"));
+        ARROW_RETURN_IF(XLENGTH(obj_i) != byte_width,
+                        Status::RError("Expecting a raw vector of ", byte_width,
+                                       " bytes, not ", XLENGTH(obj_i)));
+      }
+    }
+    RETURN_NOT_OK(typed_builder_->Reserve(n * byte_width));
+
+    // append
+    for (R_xlen_t i = 0; i < n; i++) {
+      SEXP obj_i = VECTOR_ELT(obj, i);
+      if (Rf_isNull(obj_i)) {
+        RETURN_NOT_OK(typed_builder_->AppendNull());
+      } else {
+        RETURN_NOT_OK(typed_builder_->Append(RAW(obj_i)));
+      }
+    }
+    return Status::OK();
+  }
+
+  Status GetResult(std::shared_ptr<arrow::Array>* result) {
+    return typed_builder_->Finish(result);
+  }
+
+ private:
+  FixedSizeBinaryBuilder* typed_builder_;
+};
+
+template <typename StringBuilder>
+class StringVectorConverter : public VectorConverter {
+ public:
+  ~StringVectorConverter() {}
+
+  Status Init(ArrayBuilder* builder) {
+    typed_builder_ = checked_cast<StringBuilder*>(builder);
+    return Status::OK();
+  }
+
+  Status Ingest(SEXP obj) {
+    ARROW_RETURN_IF(TYPEOF(obj) != STRSXP,
+                    Status::RError("Expecting a character vector"));
+
+    cpp11::strings s(arrow::r::utf8_strings(obj));
+    RETURN_NOT_OK(typed_builder_->Reserve(s.size()));
+
+    // we know all the R strings are utf8 already, so we can get
+    // a definite size and then use UnsafeAppend*()
+    int64_t total_length = 0;
+    for (cpp11::r_string si : s) {
+      total_length += cpp11::is_na(si) ? 0 : si.size();
+    }
+    RETURN_NOT_OK(typed_builder_->ReserveData(total_length));
+
+    // append
+    for (cpp11::r_string si : s) {
+      if (si == NA_STRING) {
+        typed_builder_->UnsafeAppendNull();
+      } else {
+        typed_builder_->UnsafeAppend(CHAR(si), si.size());
+      }
+    }
+
+    return Status::OK();
+  }
+
+  Status GetResult(std::shared_ptr<arrow::Array>* result) {
+    return typed_builder_->Finish(result);
+  }
+
+ private:
+  StringBuilder* typed_builder_;
+};
+
 #define NUMERIC_CONVERTER(TYPE_ENUM, TYPE)                                               \
   case Type::TYPE_ENUM:                                                                  \
     *out =                                                                               \
@@ -706,7 +1128,12 @@ class Time64Converter : public TimeConverter<Time64Type> {
 Status GetConverter(const std::shared_ptr<DataType>& type,
                     std::unique_ptr<VectorConverter>* out) {
   switch (type->id()) {
+    SIMPLE_CONVERTER_CASE(BINARY, BinaryVectorConverter<arrow::BinaryBuilder>);
+    SIMPLE_CONVERTER_CASE(LARGE_BINARY, BinaryVectorConverter<arrow::LargeBinaryBuilder>);
+    SIMPLE_CONVERTER_CASE(FIXED_SIZE_BINARY, FixedSizeBinaryVectorConverter);
     SIMPLE_CONVERTER_CASE(BOOL, BooleanVectorConverter);
+    SIMPLE_CONVERTER_CASE(STRING, StringVectorConverter<arrow::StringBuilder>);
+    SIMPLE_CONVERTER_CASE(LARGE_STRING, StringVectorConverter<arrow::LargeStringBuilder>);
     NUMERIC_CONVERTER(INT8, Int8Type);
     NUMERIC_CONVERTER(INT16, Int16Type);
     NUMERIC_CONVERTER(INT32, Int32Type);
@@ -725,14 +1152,16 @@ Status GetConverter(const std::shared_ptr<DataType>& type,
     SIMPLE_CONVERTER_CASE(DATE32, Date32Converter);
     SIMPLE_CONVERTER_CASE(DATE64, Date64Converter);
 
-      // TODO: probably after we merge ARROW-3628
-      // case Type::DECIMAL:
+    // TODO: probably after we merge ARROW-3628
+    // case Type::DECIMAL:
 
-    case Type::DICTIONARY:
+    TIME_CONVERTER_CASE(TIME32, Time32Type, Time32Converter);
+    TIME_CONVERTER_CASE(TIME64, Time64Type, Time64Converter);
+    TIME_CONVERTER_CASE(TIMESTAMP, TimestampType, TimestampConverter);
 
-      TIME_CONVERTER_CASE(TIME32, Time32Type, Time32Converter);
-      TIME_CONVERTER_CASE(TIME64, Time64Type, Time64Converter);
-      TIME_CONVERTER_CASE(TIMESTAMP, TimestampType, TimestampConverter);
+    case Type::NA:
+      *out = std::unique_ptr<NullVectorConverter>(new NullVectorConverter);
+      return Status::OK();
 
     default:
       break;
@@ -740,64 +1169,169 @@ Status GetConverter(const std::shared_ptr<DataType>& type,
   return Status::NotImplemented("type not implemented");
 }
 
-template <typename Type>
-std::shared_ptr<arrow::DataType> GetFactorTypeImpl(Rcpp::IntegerVector_ factor) {
-  auto dict_values = MakeStringArray(Rf_getAttrib(factor, R_LevelsSymbol));
-  auto dict_type =
-      dictionary(std::make_shared<Type>(), dict_values, Rf_inherits(factor, "ordered"));
-  return dict_type;
-}
-
-std::shared_ptr<arrow::DataType> GetFactorType(SEXP factor) {
-  SEXP levels = Rf_getAttrib(factor, R_LevelsSymbol);
-  int n = Rf_length(levels);
-  if (n < 128) {
-    return GetFactorTypeImpl<arrow::Int8Type>(factor);
-  } else if (n < 32768) {
-    return GetFactorTypeImpl<arrow::Int16Type>(factor);
+static inline std::shared_ptr<arrow::DataType> IndexTypeForFactors(int n_factors) {
+  if (n_factors < INT8_MAX) {
+    return arrow::int8();
+  } else if (n_factors < INT16_MAX) {
+    return arrow::int16();
   } else {
-    return GetFactorTypeImpl<arrow::Int32Type>(factor);
+    return arrow::int32();
   }
 }
 
-std::shared_ptr<arrow::DataType> InferType(SEXP x) {
+std::shared_ptr<arrow::DataType> InferArrowTypeFromFactor(SEXP factor) {
+  SEXP factors = Rf_getAttrib(factor, R_LevelsSymbol);
+  auto index_type = IndexTypeForFactors(Rf_length(factors));
+  bool is_ordered = Rf_inherits(factor, "ordered");
+  return dictionary(index_type, arrow::utf8(), is_ordered);
+}
+
+template <int VectorType>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector(SEXP x) {
+  cpp11::stop("Unknown vector type: ", VectorType);
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<ENVSXP>(SEXP x) {
+  if (Rf_inherits(x, "Array")) {
+    return cpp11::as_cpp<std::shared_ptr<arrow::Array>>(x)->type();
+  }
+
+  cpp11::stop("Unrecognized vector instance for type ENVSXP");
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<LGLSXP>(SEXP x) {
+  return Rf_inherits(x, "vctrs_unspecified") ? null() : boolean();
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<INTSXP>(SEXP x) {
+  if (Rf_isFactor(x)) {
+    return InferArrowTypeFromFactor(x);
+  } else if (Rf_inherits(x, "Date")) {
+    return date32();
+  } else if (Rf_inherits(x, "POSIXct")) {
+    auto tzone_sexp = Rf_getAttrib(x, symbols::tzone);
+    if (Rf_isNull(tzone_sexp)) {
+      return timestamp(TimeUnit::MICRO);
+    } else {
+      return timestamp(TimeUnit::MICRO, CHAR(STRING_ELT(tzone_sexp, 0)));
+    }
+  }
+  return int32();
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<REALSXP>(SEXP x) {
+  if (Rf_inherits(x, "Date")) {
+    return date32();
+  }
+  if (Rf_inherits(x, "POSIXct")) {
+    auto tzone_sexp = Rf_getAttrib(x, symbols::tzone);
+    if (Rf_isNull(tzone_sexp)) {
+      return timestamp(TimeUnit::MICRO);
+    } else {
+      return timestamp(TimeUnit::MICRO, CHAR(STRING_ELT(tzone_sexp, 0)));
+    }
+  }
+  if (Rf_inherits(x, "integer64")) {
+    return int64();
+  }
+  if (Rf_inherits(x, "difftime")) {
+    return time32(TimeUnit::SECOND);
+  }
+  return float64();
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<STRSXP>(SEXP x) {
+  return cpp11::unwind_protect([&] {
+    R_xlen_t n = XLENGTH(x);
+
+    int64_t size = 0;
+
+    for (R_xlen_t i = 0; i < n; i++) {
+      size += arrow::r::unsafe::r_string_size(STRING_ELT(x, i));
+      if (size > arrow::kBinaryMemoryLimit) {
+        // Exceeds 2GB capacity of utf8 type, so use large
+        return large_utf8();
+      }
+    }
+
+    return utf8();
+  });
+}
+
+static inline std::shared_ptr<arrow::DataType> InferArrowTypeFromDataFrame(
+    cpp11::list x) {
+  R_xlen_t n = x.size();
+  cpp11::strings names(x.attr(R_NamesSymbol));
+  std::vector<std::shared_ptr<arrow::Field>> fields(n);
+  for (R_xlen_t i = 0; i < n; i++) {
+    fields[i] = arrow::field(names[i], InferArrowType(x[i]));
+  }
+  return arrow::struct_(std::move(fields));
+}
+
+template <>
+std::shared_ptr<arrow::DataType> InferArrowTypeFromVector<VECSXP>(SEXP x) {
+  if (Rf_inherits(x, "data.frame") || Rf_inherits(x, "POSIXlt")) {
+    return InferArrowTypeFromDataFrame(x);
+  } else {
+    // some known special cases
+    if (Rf_inherits(x, "arrow_fixed_size_binary")) {
+      SEXP byte_width = Rf_getAttrib(x, symbols::byte_width);
+      if (Rf_isNull(byte_width) || TYPEOF(byte_width) != INTSXP ||
+          XLENGTH(byte_width) != 1) {
+        cpp11::stop("malformed arrow_fixed_size_binary object");
+      }
+      return arrow::fixed_size_binary(INTEGER(byte_width)[0]);
+    }
+
+    if (Rf_inherits(x, "arrow_binary")) {
+      return arrow::binary();
+    }
+
+    if (Rf_inherits(x, "arrow_large_binary")) {
+      return arrow::large_binary();
+    }
+
+    SEXP ptype = Rf_getAttrib(x, symbols::ptype);
+    if (Rf_isNull(ptype)) {
+      if (XLENGTH(x) == 0) {
+        cpp11::stop(
+            "Requires at least one element to infer the values' type of a list vector");
+      }
+
+      ptype = VECTOR_ELT(x, 0);
+    }
+
+    return arrow::list(InferArrowType(ptype));
+  }
+}
+
+std::shared_ptr<arrow::DataType> InferArrowType(SEXP x) {
   switch (TYPEOF(x)) {
+    case ENVSXP:
+      return InferArrowTypeFromVector<ENVSXP>(x);
     case LGLSXP:
-      return boolean();
+      return InferArrowTypeFromVector<LGLSXP>(x);
     case INTSXP:
-      if (Rf_isFactor(x)) {
-        return GetFactorType(x);
-      }
-      if (Rf_inherits(x, "Date")) {
-        return date32();
-      }
-      if (Rf_inherits(x, "POSIXct")) {
-        return timestamp(TimeUnit::MICRO, "GMT");
-      }
-      return int32();
+      return InferArrowTypeFromVector<INTSXP>(x);
     case REALSXP:
-      if (Rf_inherits(x, "Date")) {
-        return date32();
-      }
-      if (Rf_inherits(x, "POSIXct")) {
-        return timestamp(TimeUnit::MICRO, "GMT");
-      }
-      if (Rf_inherits(x, "integer64")) {
-        return int64();
-      }
-      if (Rf_inherits(x, "difftime")) {
-        return time32(TimeUnit::SECOND);
-      }
-      return float64();
+      return InferArrowTypeFromVector<REALSXP>(x);
     case RAWSXP:
       return int8();
     case STRSXP:
-      return utf8();
+      return InferArrowTypeFromVector<STRSXP>(x);
+    case VECSXP:
+      return InferArrowTypeFromVector<VECSXP>(x);
     default:
       break;
   }
 
-  Rcpp::stop("cannot infer type from data");
+  cpp11::stop("Cannot infer type from vector");
 }
 
 // in some situations we can just use the memory of the R object in an RBuffer
@@ -818,43 +1352,24 @@ bool can_reuse_memory(SEXP x, const std::shared_ptr<arrow::DataType>& type) {
   return false;
 }
 
-template <typename T>
-inline bool is_na(T value) {
-  return false;
-}
-
-template <>
-inline bool is_na<int64_t>(int64_t value) {
-  return value == NA_INT64;
-}
-
-template <>
-inline bool is_na<double>(double value) {
-  return ISNA(value);
-}
-
-template <>
-inline bool is_na<int>(int value) {
-  return value == NA_INTEGER;
-}
 // this is only used on some special cases when the arrow Array can just use the memory of
 // the R object, via an RBuffer, hence be zero copy
-template <int RTYPE, typename Type>
+template <int RTYPE, typename RVector, typename Type>
 std::shared_ptr<Array> MakeSimpleArray(SEXP x) {
   using value_type = typename arrow::TypeTraits<Type>::ArrayType::value_type;
-  Rcpp::Vector<RTYPE, Rcpp::NoProtectStorage> vec(x);
+  RVector vec(x);
   auto n = vec.size();
-  auto p_vec_start = reinterpret_cast<value_type*>(vec.begin());
+  auto p_vec_start = reinterpret_cast<value_type*>(DATAPTR(vec));
   auto p_vec_end = p_vec_start + n;
   std::vector<std::shared_ptr<Buffer>> buffers{nullptr,
-                                               std::make_shared<RBuffer<RTYPE>>(vec)};
+                                               std::make_shared<RBuffer<RVector>>(vec)};
 
   int null_count = 0;
-  std::shared_ptr<Buffer> null_bitmap;
 
   auto first_na = std::find_if(p_vec_start, p_vec_end, is_na<value_type>);
   if (first_na < p_vec_end) {
-    STOP_IF_NOT_OK(AllocateBuffer(BitUtil::BytesForBits(n), &null_bitmap));
+    auto null_bitmap =
+        ValueOrStop(AllocateBuffer(BitUtil::BytesForBits(n), gc_memory_pool()));
     internal::FirstTimeBitmapWriter bitmap_writer(null_bitmap->mutable_data(), 0, n);
 
     // first loop to clear all the bits before the first NA
@@ -880,153 +1395,205 @@ std::shared_ptr<Array> MakeSimpleArray(SEXP x) {
   }
 
   auto data = ArrayData::Make(std::make_shared<Type>(), LENGTH(x), std::move(buffers),
-                              null_count, 0);
+                              null_count, 0 /*offset*/);
 
   // return the right Array class
   return std::make_shared<typename TypeTraits<Type>::ArrayType>(data);
 }
 
 std::shared_ptr<arrow::Array> Array__from_vector_reuse_memory(SEXP x) {
-  switch (TYPEOF(x)) {
-    case INTSXP:
-      return MakeSimpleArray<INTSXP, Int32Type>(x);
-    case REALSXP:
-      if (Rf_inherits(x, "integer64")) {
-        return MakeSimpleArray<REALSXP, Int64Type>(x);
-      }
-      return MakeSimpleArray<REALSXP, DoubleType>(x);
-    case RAWSXP:
-      return MakeSimpleArray<RAWSXP, Int8Type>(x);
-    default:
-      break;
+  auto type = TYPEOF(x);
+
+  if (type == INTSXP) {
+    return MakeSimpleArray<INTSXP, cpp11::integers, Int32Type>(x);
+  } else if (type == REALSXP && Rf_inherits(x, "integer64")) {
+    return MakeSimpleArray<REALSXP, cpp11::doubles, Int64Type>(x);
+  } else if (type == REALSXP) {
+    return MakeSimpleArray<REALSXP, cpp11::doubles, DoubleType>(x);
+  } else if (type == RAWSXP) {
+    return MakeSimpleArray<RAWSXP, cpp11::raws, UInt8Type>(x);
   }
 
-  Rcpp::stop("not implemented");
+  cpp11::stop("Unreachable: you might need to fix can_reuse_memory()");
 }
 
 bool CheckCompatibleFactor(SEXP obj, const std::shared_ptr<arrow::DataType>& type) {
-  if (!Rf_inherits(obj, "factor")) return false;
-
-  arrow::DictionaryType* dict_type =
-      arrow::checked_cast<arrow::DictionaryType*>(type.get());
-  auto dictionary = dict_type->dictionary();
-  if (dictionary->type() != utf8()) return false;
-
-  // then compare levels
-  auto typed_dict = checked_cast<arrow::StringArray*>(dictionary.get());
-  SEXP levels = Rf_getAttrib(obj, R_LevelsSymbol);
-
-  R_xlen_t n = XLENGTH(levels);
-  if (n != typed_dict->length()) return false;
-
-  for (R_xlen_t i = 0; i < n; i++) {
-    if (typed_dict->GetString(i) != CHAR(STRING_ELT(levels, i))) return false;
+  if (!Rf_inherits(obj, "factor")) {
+    return false;
   }
 
-  return true;
+  const auto& dict_type = checked_cast<const arrow::DictionaryType&>(*type);
+  return dict_type.value_type()->Equals(utf8());
+}
+
+arrow::Status CheckCompatibleStruct(SEXP obj,
+                                    const std::shared_ptr<arrow::DataType>& type) {
+  if (!Rf_inherits(obj, "data.frame")) {
+    return Status::RError("Conversion to struct arrays requires a data.frame");
+  }
+
+  // check the number of columns
+  int num_fields = type->num_fields();
+  if (XLENGTH(obj) != num_fields) {
+    return Status::RError("Number of fields in struct (", num_fields,
+                          ") incompatible with number of columns in the data frame (",
+                          XLENGTH(obj), ")");
+  }
+
+  // check the names of each column
+  //
+  // the columns themselves are not checked against the
+  // types of the fields, because Array__from_vector will error
+  // when not compatible.
+  cpp11::strings names = Rf_getAttrib(obj, R_NamesSymbol);
+
+  return cpp11::unwind_protect([&] {
+    for (int i = 0; i < num_fields; i++) {
+      const char* name_i = arrow::r::unsafe::utf8_string(names[i]);
+      auto field_name = type->field(i)->name();
+      if (field_name != name_i) {
+        return Status::RError(
+            "Field name in position ", i, " (", field_name,
+            ") does not match the name of the column of the data frame (", name_i, ")");
+      }
+    }
+
+    return Status::OK();
+  });
 }
 
 std::shared_ptr<arrow::Array> Array__from_vector(
-    SEXP x, const std::shared_ptr<arrow::DataType>& type, bool type_infered) {
+    SEXP x, const std::shared_ptr<arrow::DataType>& type, bool type_inferred) {
+  // short circuit if `x` is already an Array
+  if (Rf_inherits(x, "Array")) {
+    return cpp11::as_cpp<std::shared_ptr<arrow::Array>>(x);
+  }
+
   // special case when we can just use the data from the R vector
   // directly. This still needs to handle the null bitmap
   if (arrow::r::can_reuse_memory(x, type)) {
     return arrow::r::Array__from_vector_reuse_memory(x);
   }
 
-  // treat strings separately for now
-  if (type->id() == Type::STRING) {
-    STOP_IF_NOT(TYPEOF(x) == STRSXP, "Cannot convert R object to string array");
-    return arrow::r::MakeStringArray(x);
-  }
-
-  // factors only when type has been infered
+  // factors only when type has been inferred
   if (type->id() == Type::DICTIONARY) {
-    if (type_infered || arrow::r::CheckCompatibleFactor(x, type)) {
+    if (type_inferred || arrow::r::CheckCompatibleFactor(x, type)) {
+      // TODO: use VectorToArrayConverter instead, but it does not appear to work
+      // correctly with ordered dictionary yet
+      //
+      // return VectorToArrayConverter::Visit(x, type);
       return arrow::r::MakeFactorArray(x, type);
     }
 
-    Rcpp::stop("Object incompatible with dictionary type");
+    cpp11::stop("Object incompatible with dictionary type");
+  }
+
+  if (type->id() == Type::LIST || type->id() == Type::LARGE_LIST ||
+      type->id() == Type::FIXED_SIZE_LIST) {
+    return VectorToArrayConverter::Visit(x, type);
+  }
+
+  // struct types
+  if (type->id() == Type::STRUCT) {
+    if (!type_inferred) {
+      StopIfNotOk(arrow::r::CheckCompatibleStruct(x, type));
+    }
+    // TODO: when the type has been infered, we could go through
+    //       VectorToArrayConverter:
+    //
+    // else {
+    //   return VectorToArrayConverter::Visit(df, type);
+    // }
+
+    return arrow::r::MakeStructArray(x, type);
   }
 
   // general conversion with converter and builder
   std::unique_ptr<arrow::r::VectorConverter> converter;
-  STOP_IF_NOT_OK(arrow::r::GetConverter(type, &converter));
+  StopIfNotOk(arrow::r::GetConverter(type, &converter));
 
   // Create ArrayBuilder for type
   std::unique_ptr<arrow::ArrayBuilder> type_builder;
-  STOP_IF_NOT_OK(arrow::MakeBuilder(arrow::default_memory_pool(), type, &type_builder));
-  STOP_IF_NOT_OK(converter->Init(type_builder.get()));
+  StopIfNotOk(arrow::MakeBuilder(gc_memory_pool(), type, &type_builder));
+  StopIfNotOk(converter->Init(type_builder.get()));
 
   // ingest R data and grab the result array
-  STOP_IF_NOT_OK(converter->Ingest(x));
+  StopIfNotOk(converter->Ingest(x));
   std::shared_ptr<arrow::Array> result;
-  STOP_IF_NOT_OK(converter->GetResult(&result));
-
+  StopIfNotOk(converter->GetResult(&result));
   return result;
 }
 
 }  // namespace r
 }  // namespace arrow
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::DataType> Array__infer_type(SEXP x) {
-  return arrow::r::InferType(x);
+  return arrow::r::InferArrowType(x);
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::Array> Array__from_vector(SEXP x, SEXP s_type) {
   // the type might be NULL, in which case we need to infer it from the data
-  // we keep track of whether it was infered or supplied
-  bool type_infered = Rf_isNull(s_type);
+  // we keep track of whether it was inferred or supplied
+  bool type_inferred = Rf_isNull(s_type);
   std::shared_ptr<arrow::DataType> type;
-  if (type_infered) {
-    type = arrow::r::InferType(x);
+  if (type_inferred) {
+    type = arrow::r::InferArrowType(x);
   } else {
-    type = arrow::r::extract<arrow::DataType>(s_type);
+    type = cpp11::as_cpp<std::shared_ptr<arrow::DataType>>(s_type);
   }
 
-  return arrow::r::Array__from_vector(x, type, type_infered);
+  return arrow::r::Array__from_vector(x, type, type_inferred);
 }
 
-// [[Rcpp::export]]
-std::shared_ptr<arrow::ChunkedArray> ChunkedArray__from_list(Rcpp::List chunks,
+// [[arrow::export]]
+std::shared_ptr<arrow::ChunkedArray> ChunkedArray__from_list(cpp11::list chunks,
                                                              SEXP s_type) {
   std::vector<std::shared_ptr<arrow::Array>> vec;
 
   // the type might be NULL, in which case we need to infer it from the data
-  // we keep track of whether it was infered or supplied
-  bool type_infered = Rf_isNull(s_type);
+  // we keep track of whether it was inferred or supplied
+  bool type_inferred = Rf_isNull(s_type);
   R_xlen_t n = XLENGTH(chunks);
 
   std::shared_ptr<arrow::DataType> type;
-  if (type_infered) {
+  if (type_inferred) {
     if (n == 0) {
-      Rcpp::stop("type must be specified for empty list");
+      cpp11::stop("type must be specified for empty list");
     }
-    type = arrow::r::InferType(VECTOR_ELT(chunks, 0));
+    type = arrow::r::InferArrowType(VECTOR_ELT(chunks, 0));
   } else {
-    type = arrow::r::extract<arrow::DataType>(s_type);
+    type = cpp11::as_cpp<std::shared_ptr<arrow::DataType>>(s_type);
   }
 
   if (n == 0) {
     std::shared_ptr<arrow::Array> array;
     std::unique_ptr<arrow::ArrayBuilder> type_builder;
-    STOP_IF_NOT_OK(arrow::MakeBuilder(arrow::default_memory_pool(), type, &type_builder));
-    STOP_IF_NOT_OK(type_builder->Finish(&array));
+    StopIfNotOk(arrow::MakeBuilder(gc_memory_pool(), type, &type_builder));
+    StopIfNotOk(type_builder->Finish(&array));
     vec.push_back(array);
   } else {
     // the first - might differ from the rest of the loop
-    // because we might have infered the type from the first element of the list
+    // because we might have inferred the type from the first element of the list
     //
     // this only really matters for dictionary arrays
-    vec.push_back(
-        arrow::r::Array__from_vector(VECTOR_ELT(chunks, 0), type, type_infered));
+    vec.push_back(arrow::r::Array__from_vector(chunks[0], type, type_inferred));
 
     for (R_xlen_t i = 1; i < n; i++) {
-      vec.push_back(arrow::r::Array__from_vector(VECTOR_ELT(chunks, i), type, false));
+      vec.push_back(arrow::r::Array__from_vector(chunks[i], type, false));
     }
   }
 
   return std::make_shared<arrow::ChunkedArray>(std::move(vec));
 }
+
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> DictionaryArray__FromArrays(
+    const std::shared_ptr<arrow::DataType>& type,
+    const std::shared_ptr<arrow::Array>& indices,
+    const std::shared_ptr<arrow::Array>& dict) {
+  return ValueOrStop(arrow::DictionaryArray::FromArrays(type, indices, dict));
+}
+
+#endif

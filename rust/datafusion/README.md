@@ -21,45 +21,18 @@
 
 DataFusion is an in-memory query engine that uses Apache Arrow as the memory model. It supports executing SQL queries against CSV and Parquet files as well as querying directly against in-memory data.
 
-## Usage
+## Using DataFusion as a library
 
-
-#### Use as a lib
-Add this to your Cargo.toml:
+DataFusion can be used as a library by adding the following to your `Cargo.toml` file.
 
 ```toml
 [dependencies]
-datafusion = "0.14.0-SNAPSHOT"
+datafusion = "3.0.0-SNAPSHOT"
 ```
 
-#### Use as a bin
-##### Build your own bin(requires rust toolchains)
-```sh
-git clone https://github/apache/arrow
-cd arrow/rust/datafusion
-cargo run --bin datafusion-cli
-```
-##### Use Dockerfile
-```sh
-git clone https://github/apache/arrow
-cd arrow
-docker build -f rust/datafusion/Dockerfile . --tag datafusion-cli
-docker run -it -v $(your_data_location):/data datafusion-cli
-```
+## Using DataFusion as a binary
 
-```
-USAGE:
-    datafusion-cli [OPTIONS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -c, --batch-size <batch-size>    The batch size of each query, default value is 1048576
-    -p, --data-path <data-path>      Path to your data, default to current directory
-```
-
+DataFusion includes a simple command-line interactive SQL utility. See the [CLI reference](docs/cli.md) for more information.
 
 # Status
 
@@ -69,21 +42,34 @@ OPTIONS:
 - [x] SQL Query Planner
 - [x] Query Optimizer
 - [x] Projection push down
-- [ ] Predicate push down
+- [x] Predicate push down
 - [x] Type coercion
-- [ ] Parallel query execution
+- [x] Parallel query execution
 
 ## SQL Support
 
 - [x] Projection
-- [x] Selection
-- [x] Aggregate
-- [ ] Sorting
+- [x] Filter (WHERE)
 - [x] Limit
-- [ ] Nested types and dot notation
+- [x] Aggregate
+- [x] UDFs (user-defined functions)
+- [x] UDAFs (user-defined aggregate functions)
+- [x] Common math functions
+- String functions
+  - [x] Length
+  - [x] Concatenate
+- Miscellaneous/Boolean functions
+  - [x] nullif
+- Common date/time functions
+  - [ ] Basic date functions
+  - [ ] Basic time functions
+  - [x] Basic timestamp functions
+- nested functions
+  - [x] Array of columns
+- [x] Sorting
+- [ ] Nested types
 - [ ] Lists
-- [ ] UDFs
-- [ ] Subqueries
+- [x] Subqueries
 - [ ] Joins
 
 ## Data Sources
@@ -92,76 +78,123 @@ OPTIONS:
 - [x] Parquet primitive types
 - [ ] Parquet nested types
 
-# Example
+# Supported SQL
 
-Here is a brief example for running a SQL query against a CSV file. See the [examples](examples) directory for full examples.
+This library currently supports the following SQL constructs:
+
+* `CREATE EXTERNAL TABLE X STORED AS PARQUET LOCATION '...';` to register a table's locations
+* `SELECT ... FROM ...` together with any expression
+* `ALIAS` to name an expression
+* `CAST` to change types, including e.g. `Timestamp(Nanosecond, None)`
+* most mathematical unary and binary expressions such as `+`, `/`, `sqrt`, `tan`, `>=`.
+* `WHERE` to filter
+* `GROUP BY` together with one of the following aggregations: `MIN`, `MAX`, `COUNT`, `SUM`, `AVG`
+* `ORDER BY` together with an expression and optional `ASC` or `DESC` and also optional `NULLS FIRST` or `NULLS LAST`
+
+## Supported Data Types
+
+DataFusion uses Arrow, and thus the Arrow type system, for query
+execution. The SQL types from
+[sqlparser-rs](https://github.com/ballista-compute/sqlparser-rs/blob/main/src/ast/data_type.rs#L57)
+are mapped to Arrow types according to the following table
+
+
+| SQL Data Type   | Arrow DataType                   |
+| --------------- | -------------------------------- |
+| `CHAR`          | `Utf8`                           |
+| `VARCHAR`       | `Utf8`                           |
+| `UUID`          | *Not yet supported*              |
+| `CLOB`          | *Not yet supported*              |
+| `BINARY`        | *Not yet supported*              |
+| `VARBINARY`     | *Not yet supported*              |
+| `DECIMAL`       | `Float64`                        |
+| `FLOAT`         | `Float32`                        |
+| `SMALLINT`      | `Int16`                          |
+| `INT`           | `Int32`                          |
+| `BIGINT`        | `Int64`                          |
+| `REAL`          | `Float64`                        |
+| `DOUBLE`        | `Float64`                        |
+| `BOOLEAN`       | `Boolean`                        |
+| `DATE`          | `Date64(DateUnit::Day)`          |
+| `TIME`          | `Time64(TimeUnit::Millisecond)`  |
+| `TIMESTAMP`     | `Date64(DateUnit::Millisecond)`  |
+| `INTERVAL`      | *Not yet supported*              |
+| `REGCLASS`      | *Not yet supported*              |
+| `TEXT`          | *Not yet supported*              |
+| `BYTEA`         | *Not yet supported*              |
+| `CUSTOM`        | *Not yet supported*              |
+| `ARRAY`         | *Not yet supported*              |
+
+# Developer's guide
+
+This section describes how you can get started at developing DataFusion.
+
+### Bootstrap environment
+
+DataFusion is written in Rust and it uses a standard rust toolkit:
+
+* `cargo build`
+* `cargo fmt` to format the code
+* `cargo test` to test
+* etc.
+
+## How to add a new scalar function
+
+Below is a checklist of what you need to do to add a new scalar function to DataFusion:
+
+* Add the actual implementation of the function:
+  * [here](src/physical_plan/string_expressions.rs) for string functions
+  * [here](src/physical_plan/math_expressions.rs) for math functions
+  * [here](src/physical_plan/datetime_expressions.rs) for datetime functions
+  * create a new module [here](src/physical_plan) for other functions
+* In [src/physical_plan/functions](src/physical_plan/functions.rs), add:
+  * a new variant to `BuiltinScalarFunction`
+  * a new entry to `FromStr` with the name of the function as called by SQL
+  * a new line in `return_type` with the expected return type of the function, given an incoming type
+  * a new line in `signature` with the signature of the function (number and types of its arguments)
+  * a new line in `create_physical_expr` mapping the built-in to the implementation
+  * tests to the function.
+* In [tests/sql.rs](tests/sql.rs), add a new test where the function is called through SQL against well known data and returns the expected result.
+* In [src/logical_plan/expr](src/logical_plan/expr.rs), add:
+  * a new entry of the `unary_scalar_expr!` macro for the new function.
+* In [src/logical_plan/mod](src/logical_plan/mod.rs), add:
+  * a new entry in the `pub use expr::{}` set.
+
+## How to add a new aggregate function
+
+Below is a checklist of what you need to do to add a new aggregate function to DataFusion:
+
+* Add the actual implementation of an `Accumulator` and `AggregateExpr`:
+  * [here](src/physical_plan/string_expressions.rs) for string functions
+  * [here](src/physical_plan/math_expressions.rs) for math functions
+  * [here](src/physical_plan/datetime_expressions.rs) for datetime functions
+  * create a new module [here](src/physical_plan) for other functions
+* In [src/physical_plan/aggregates](src/physical_plan/aggregates.rs), add:
+  * a new variant to `BuiltinAggregateFunction`
+  * a new entry to `FromStr` with the name of the function as called by SQL
+  * a new line in `return_type` with the expected return type of the function, given an incoming type
+  * a new line in `signature` with the signature of the function (number and types of its arguments)
+  * a new line in `create_aggregate_expr` mapping the built-in to the implementation
+  * tests to the function.
+* In [tests/sql.rs](tests/sql.rs), add a new test where the function is called through SQL against well known data and returns the expected result.
+
+## How to display plans graphically
+
+The query plans represented by `LogicalPlan` nodes can be graphically
+rendered using [Graphviz](http://www.graphviz.org/).
+
+To do so, save the output of the `display_graphviz` function to a file.:
 
 ```rust
-fn main() {
-    // create local execution context
-    let mut ctx = ExecutionContext::new();
+// Create plan somehow...
+let mut output = File::create("/tmp/plan.dot")?;
+write!(output, "{}", plan.display_graphviz());
+```
 
-    // define schema for data source (csv file)
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("c1", DataType::Utf8, false),
-        Field::new("c2", DataType::UInt32, false),
-        Field::new("c3", DataType::Int8, false),
-        Field::new("c4", DataType::Int16, false),
-        Field::new("c5", DataType::Int32, false),
-        Field::new("c6", DataType::Int64, false),
-        Field::new("c7", DataType::UInt8, false),
-        Field::new("c8", DataType::UInt16, false),
-        Field::new("c9", DataType::UInt32, false),
-        Field::new("c10", DataType::UInt64, false),
-        Field::new("c11", DataType::Float32, false),
-        Field::new("c12", DataType::Float64, false),
-        Field::new("c13", DataType::Utf8, false),
-    ]));
+Then, use the `dot` command line tool to render it into a file that
+can be displayed. For example, the following command creates a
+`/tmp/plan.pdf` file:
 
-    // register csv file with the execution context
-    let csv_datasource = CsvDataSource::new(
-        "../../testing/data/csv/aggregate_test_100.csv",
-        schema.clone(),
-        1024,
-    );
-    ctx.register_datasource("aggregate_test_100", Rc::new(RefCell::new(csv_datasource)));
-
-    // execute the query
-    let sql = "SELECT c1, MIN(c12), MAX(c12) FROM aggregate_test_100 WHERE c11 > 0.1 AND c11 < 0.9 GROUP BY c1";
-    let relation = ctx.sql(&sql).unwrap();
-    let mut results = relation.borrow_mut();
-
-    // iterate over result batches
-    while let Some(batch) = results.next().unwrap() {
-        println!(
-            "RecordBatch has {} rows and {} columns",
-            batch.num_rows(),
-            batch.num_columns()
-        );
-
-        let c1 = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<BinaryArray>()
-            .unwrap();
-
-        let min = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<Float64Array>()
-            .unwrap();
-
-        let max = batch
-            .column(2)
-            .as_any()
-            .downcast_ref::<Float64Array>()
-            .unwrap();
-
-        for i in 0..batch.num_rows() {
-            let c1_value: String = String::from_utf8(c1.value(i).to_vec()).unwrap();
-
-            println!("{}, Min: {}, Max: {}", c1_value, min.value(i), max.value(i),);
-        }
-    }
-}
+```bash
+dot -Tpdf < /tmp/plan.dot > /tmp/plan.pdf
 ```

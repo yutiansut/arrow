@@ -42,7 +42,7 @@ G_DEFINE_INTERFACE(GArrowFile,
                    G_TYPE_OBJECT)
 
 static void
-garrow_file_default_init (GArrowFileInterface *iface)
+garrow_file_default_init(GArrowFileInterface *iface)
 {
 }
 
@@ -55,7 +55,7 @@ garrow_file_default_init (GArrowFileInterface *iface)
  */
 gboolean
 garrow_file_close(GArrowFile *file,
-                     GError **error)
+                  GError **error)
 {
   auto arrow_file = garrow_file_get_raw(file);
 
@@ -91,10 +91,9 @@ garrow_file_tell(GArrowFile *file,
 {
   auto arrow_file = garrow_file_get_raw(file);
 
-  int64_t position;
-  auto status = arrow_file->Tell(&position);
-  if (garrow_error_check(error, status, "[io][file][tell]")) {
-    return position;
+  const auto position = arrow_file->Tell();
+  if (garrow::check(error, position, "[io][file][tell]")) {
+    return position.ValueOrDie();
   } else {
     return -1;
   }

@@ -17,102 +17,264 @@
 
 #include "./arrow_types.h"
 
-using Rcpp::LogicalVector;
-using Rcpp::no_init;
+#if defined(ARROW_R_WITH_ARROW)
 
-// [[Rcpp::export]]
+#include <arrow/array.h>
+#include <arrow/util/bitmap_reader.h>
+
+namespace cpp11 {
+
+const char* r6_class_name<arrow::Array>::get(const std::shared_ptr<arrow::Array>& array) {
+  auto type = array->type_id();
+  switch (type) {
+    case arrow::Type::DICTIONARY:
+      return "DictionaryArray";
+    case arrow::Type::STRUCT:
+      return "StructArray";
+    case arrow::Type::LIST:
+      return "ListArray";
+    case arrow::Type::LARGE_LIST:
+      return "LargeListArray";
+    case arrow::Type::FIXED_SIZE_LIST:
+      return "FixedSizeListArray";
+
+    default:
+      return "Array";
+  }
+}
+
+}  // namespace cpp11
+
+void arrow::r::validate_slice_offset(R_xlen_t offset, int64_t len) {
+  if (offset == NA_INTEGER) {
+    cpp11::stop("Slice 'offset' cannot be NA");
+  }
+  if (offset < 0) {
+    cpp11::stop("Slice 'offset' cannot be negative");
+  }
+  if (offset > len) {
+    cpp11::stop("Slice 'offset' greater than array length");
+  }
+}
+
+void arrow::r::validate_slice_length(R_xlen_t length, int64_t available) {
+  if (length == NA_INTEGER) {
+    cpp11::stop("Slice 'length' cannot be NA");
+  }
+  if (length < 0) {
+    cpp11::stop("Slice 'length' cannot be negative");
+  }
+  if (length > available) {
+    cpp11::warning("Slice 'length' greater than available length");
+  }
+}
+
+// [[arrow::export]]
 std::shared_ptr<arrow::Array> Array__Slice1(const std::shared_ptr<arrow::Array>& array,
-                                            int offset) {
+                                            R_xlen_t offset) {
+  arrow::r::validate_slice_offset(offset, array->length());
   return array->Slice(offset);
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::Array> Array__Slice2(const std::shared_ptr<arrow::Array>& array,
-                                            int offset, int length) {
+                                            R_xlen_t offset, R_xlen_t length) {
+  arrow::r::validate_slice_offset(offset, array->length());
+  arrow::r::validate_slice_length(length, array->length() - offset);
   return array->Slice(offset, length);
 }
 
-// [[Rcpp::export]]
-bool Array__IsNull(const std::shared_ptr<arrow::Array>& x, int i) { return x->IsNull(i); }
+void arrow::r::validate_index(int i, int len) {
+  if (i == NA_INTEGER) {
+    cpp11::stop("'i' cannot be NA");
+  }
+  if (i < 0 || i >= len) {
+    cpp11::stop("subscript out of bounds");
+  }
+}
 
-// [[Rcpp::export]]
-bool Array__IsValid(const std::shared_ptr<arrow::Array>& x, int i) {
+// [[arrow::export]]
+bool Array__IsNull(const std::shared_ptr<arrow::Array>& x, R_xlen_t i) {
+  arrow::r::validate_index(i, x->length());
+  return x->IsNull(i);
+}
+
+// [[arrow::export]]
+bool Array__IsValid(const std::shared_ptr<arrow::Array>& x, R_xlen_t i) {
+  arrow::r::validate_index(i, x->length());
   return x->IsValid(i);
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 int Array__length(const std::shared_ptr<arrow::Array>& x) { return x->length(); }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 int Array__offset(const std::shared_ptr<arrow::Array>& x) { return x->offset(); }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 int Array__null_count(const std::shared_ptr<arrow::Array>& x) { return x->null_count(); }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::DataType> Array__type(const std::shared_ptr<arrow::Array>& x) {
   return x->type();
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::string Array__ToString(const std::shared_ptr<arrow::Array>& x) {
   return x->ToString();
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 arrow::Type::type Array__type_id(const std::shared_ptr<arrow::Array>& x) {
   return x->type_id();
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 bool Array__Equals(const std::shared_ptr<arrow::Array>& lhs,
                    const std::shared_ptr<arrow::Array>& rhs) {
   return lhs->Equals(rhs);
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 bool Array__ApproxEquals(const std::shared_ptr<arrow::Array>& lhs,
                          const std::shared_ptr<arrow::Array>& rhs) {
   return lhs->ApproxEquals(rhs);
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::ArrayData> Array__data(
     const std::shared_ptr<arrow::Array>& array) {
   return array->data();
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 bool Array__RangeEquals(const std::shared_ptr<arrow::Array>& self,
-                        const std::shared_ptr<arrow::Array>& other, int start_idx,
-                        int end_idx, int other_start_idx) {
+                        const std::shared_ptr<arrow::Array>& other, R_xlen_t start_idx,
+                        R_xlen_t end_idx, R_xlen_t other_start_idx) {
+  if (start_idx == NA_INTEGER) {
+    cpp11::stop("'start_idx' cannot be NA");
+  }
+  if (end_idx == NA_INTEGER) {
+    cpp11::stop("'end_idx' cannot be NA");
+  }
+  if (other_start_idx == NA_INTEGER) {
+    cpp11::stop("'other_start_idx' cannot be NA");
+  }
   return self->RangeEquals(*other, start_idx, end_idx, other_start_idx);
 }
 
-// [[Rcpp::export]]
-LogicalVector Array__Mask(const std::shared_ptr<arrow::Array>& array) {
-  if (array->null_count() == 0) {
-    return LogicalVector(array->length(), true);
-  }
-
-  auto n = array->length();
-  LogicalVector res(no_init(n));
-  arrow::internal::BitmapReader bitmap_reader(array->null_bitmap()->data(),
-                                              array->offset(), n);
-  for (int64_t i = 0; i < n; i++, bitmap_reader.Next()) {
-    res[i] = bitmap_reader.IsSet();
-  }
-  return res;
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> Array__View(const std::shared_ptr<arrow::Array>& array,
+                                          const std::shared_ptr<arrow::DataType>& type) {
+  return ValueOrStop(array->View(type));
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
+void Array__Validate(const std::shared_ptr<arrow::Array>& array) {
+  StopIfNotOk(array->Validate());
+}
+
+// [[arrow::export]]
 std::shared_ptr<arrow::Array> DictionaryArray__indices(
     const std::shared_ptr<arrow::DictionaryArray>& array) {
   return array->indices();
 }
 
-// [[Rcpp::export]]
+// [[arrow::export]]
 std::shared_ptr<arrow::Array> DictionaryArray__dictionary(
     const std::shared_ptr<arrow::DictionaryArray>& array) {
   return array->dictionary();
 }
+
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> StructArray__field(
+    const std::shared_ptr<arrow::StructArray>& array, int i) {
+  return array->field(i);
+}
+
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> StructArray__GetFieldByName(
+    const std::shared_ptr<arrow::StructArray>& array, const std::string& name) {
+  return array->GetFieldByName(name);
+}
+
+// [[arrow::export]]
+cpp11::list StructArray__Flatten(const std::shared_ptr<arrow::StructArray>& array) {
+  return arrow::r::to_r_list(ValueOrStop(array->Flatten()));
+}
+
+// [[arrow::export]]
+std::shared_ptr<arrow::DataType> ListArray__value_type(
+    const std::shared_ptr<arrow::ListArray>& array) {
+  return array->value_type();
+}
+
+// [[arrow::export]]
+std::shared_ptr<arrow::DataType> LargeListArray__value_type(
+    const std::shared_ptr<arrow::LargeListArray>& array) {
+  return array->value_type();
+}
+
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> ListArray__values(
+    const std::shared_ptr<arrow::ListArray>& array) {
+  return array->values();
+}
+
+// [[arrow::export]]
+std::shared_ptr<arrow::Array> LargeListArray__values(
+    const std::shared_ptr<arrow::LargeListArray>& array) {
+  return array->values();
+}
+
+// [[arrow::export]]
+int32_t ListArray__value_length(const std::shared_ptr<arrow::ListArray>& array,
+                                int64_t i) {
+  return array->value_length(i);
+}
+
+// [[arrow::export]]
+int64_t LargeListArray__value_length(const std::shared_ptr<arrow::LargeListArray>& array,
+                                     int64_t i) {
+  return array->value_length(i);
+}
+
+// [[arrow::export]]
+int64_t FixedSizeListArray__value_length(
+    const std::shared_ptr<arrow::FixedSizeListArray>& array, int64_t i) {
+  return array->value_length(i);
+}
+
+// [[arrow::export]]
+int32_t ListArray__value_offset(const std::shared_ptr<arrow::ListArray>& array,
+                                int64_t i) {
+  return array->value_offset(i);
+}
+
+// [[arrow::export]]
+int64_t LargeListArray__value_offset(const std::shared_ptr<arrow::LargeListArray>& array,
+                                     int64_t i) {
+  return array->value_offset(i);
+}
+
+// [[arrow::export]]
+int64_t FixedSizeListArray__value_offset(
+    const std::shared_ptr<arrow::FixedSizeListArray>& array, int64_t i) {
+  return array->value_offset(i);
+}
+
+// [[arrow::export]]
+cpp11::writable::integers ListArray__raw_value_offsets(
+    const std::shared_ptr<arrow::ListArray>& array) {
+  auto offsets = array->raw_value_offsets();
+  return cpp11::writable::integers(offsets, offsets + array->length());
+}
+
+// [[arrow::export]]
+cpp11::writable::integers LargeListArray__raw_value_offsets(
+    const std::shared_ptr<arrow::LargeListArray>& array) {
+  auto offsets = array->raw_value_offsets();
+  return cpp11::writable::integers(offsets, offsets + array->length());
+}
+
+#endif

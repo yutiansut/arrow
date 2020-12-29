@@ -16,7 +16,7 @@
 // under the License.
 
 module.exports = {
-    src: 'src',
+    inputFiles: 'src',
     out: 'doc',
     mode: 'file',
     name: 'Apache Arrow',
@@ -25,8 +25,8 @@ module.exports = {
     tsconfig: 'tsconfig.json',
     excludePrivate: true,
     excludeProtected: true,
+    excludeExternals: true,
     excludeNotExported: true,
-    includeDefinitions: true,
     ignoreCompilerErrors: true,
     exclude: [
         'src/fb/*.ts',

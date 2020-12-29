@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_UTIL_LOGGING_H
-#define ARROW_UTIL_LOGGING_H
+#pragma once
 
 #ifdef GANDIVA_IR
 
@@ -36,8 +35,8 @@
 
 #else  // !GANDIVA_IR
 
-#include <iostream>
 #include <memory>
+#include <ostream>
 #include <string>
 
 #include "arrow/util/macros.h"
@@ -59,24 +58,33 @@ enum class ArrowLogLevel : int {
 
 #define ARROW_IGNORE_EXPR(expr) ((void)(expr))
 
-#define ARROW_CHECK(condition)                                                         \
-  (condition) ? ARROW_IGNORE_EXPR(0)                                                   \
-              : ::arrow::util::Voidify() &                                             \
-                    ::arrow::util::ArrowLog(__FILE__, __LINE__,                        \
-                                            ::arrow::util::ArrowLogLevel::ARROW_FATAL) \
-                        << " Check failed: " #condition " "
+#define ARROW_CHECK(condition)                                               \
+  ARROW_PREDICT_TRUE(condition)                                              \
+  ? ARROW_IGNORE_EXPR(0)                                                     \
+  : ::arrow::util::Voidify() &                                               \
+          ::arrow::util::ArrowLog(__FILE__, __LINE__,                        \
+                                  ::arrow::util::ArrowLogLevel::ARROW_FATAL) \
+              << " Check failed: " #condition " "
 
 // If 'to_call' returns a bad status, CHECK immediately with a logged message
 // of 'msg' followed by the status.
-#define ARROW_CHECK_OK_PREPEND(to_call, msg)                \
-  do {                                                      \
-    ::arrow::Status _s = (to_call);                         \
-    ARROW_CHECK(_s.ok()) << (msg) << ": " << _s.ToString(); \
+#define ARROW_CHECK_OK_PREPEND(to_call, msg)                                         \
+  do {                                                                               \
+    ::arrow::Status _s = (to_call);                                                  \
+    ARROW_CHECK(_s.ok()) << "Operation failed: " << ARROW_STRINGIFY(to_call) << "\n" \
+                         << (msg) << ": " << _s.ToString();                          \
   } while (false)
 
 // If the status is bad, CHECK immediately, appending the status to the
 // logged message.
 #define ARROW_CHECK_OK(s) ARROW_CHECK_OK_PREPEND(s, "Bad status")
+
+#define ARROW_CHECK_EQ(val1, val2) ARROW_CHECK((val1) == (val2))
+#define ARROW_CHECK_NE(val1, val2) ARROW_CHECK((val1) != (val2))
+#define ARROW_CHECK_LE(val1, val2) ARROW_CHECK((val1) <= (val2))
+#define ARROW_CHECK_LT(val1, val2) ARROW_CHECK((val1) < (val2))
+#define ARROW_CHECK_GE(val1, val2) ARROW_CHECK((val1) >= (val2))
+#define ARROW_CHECK_GT(val1, val2) ARROW_CHECK((val1) > (val2))
 
 #ifdef NDEBUG
 #define ARROW_DFATAL ::arrow::util::ArrowLogLevel::ARROW_WARNING
@@ -118,21 +126,21 @@ enum class ArrowLogLevel : int {
 #else
 #define ARROW_DFATAL ::arrow::util::ArrowLogLevel::ARROW_FATAL
 
-#define DCHECK(condition) ARROW_CHECK(condition)
-#define DCHECK_OK(status) ARROW_CHECK_OK(status)
-#define DCHECK_EQ(val1, val2) ARROW_CHECK((val1) == (val2))
-#define DCHECK_NE(val1, val2) ARROW_CHECK((val1) != (val2))
-#define DCHECK_LE(val1, val2) ARROW_CHECK((val1) <= (val2))
-#define DCHECK_LT(val1, val2) ARROW_CHECK((val1) < (val2))
-#define DCHECK_GE(val1, val2) ARROW_CHECK((val1) >= (val2))
-#define DCHECK_GT(val1, val2) ARROW_CHECK((val1) > (val2))
+#define DCHECK ARROW_CHECK
+#define DCHECK_OK ARROW_CHECK_OK
+#define DCHECK_EQ ARROW_CHECK_EQ
+#define DCHECK_NE ARROW_CHECK_NE
+#define DCHECK_LE ARROW_CHECK_LE
+#define DCHECK_LT ARROW_CHECK_LT
+#define DCHECK_GE ARROW_CHECK_GE
+#define DCHECK_GT ARROW_CHECK_GT
 
 #endif  // NDEBUG
 
 // This code is adapted from
 // https://github.com/ray-project/ray/blob/master/src/ray/util/logging.h.
 
-// To make the logging lib plugable with other logging libs and make
+// To make the logging lib pluggable with other logging libs and make
 // the implementation unawared by the user, ArrowLog is only a declaration
 // which hide the implementation into logging.cc file.
 // In logging.cc, we can choose different log libs using different macros.
@@ -153,19 +161,18 @@ class ARROW_EXPORT ArrowLogBase {
   }
 
  protected:
-  virtual std::ostream& Stream() { return std::cerr; }
+  virtual std::ostream& Stream() = 0;
 };
 
 class ARROW_EXPORT ArrowLog : public ArrowLogBase {
  public:
   ArrowLog(const char* file_name, int line_number, ArrowLogLevel severity);
-
-  virtual ~ArrowLog();
+  ~ArrowLog() override;
 
   /// Return whether or not current logging instance is enabled.
   ///
   /// \return True if logging is enabled and false otherwise.
-  virtual bool IsEnabled() const;
+  bool IsEnabled() const override;
 
   /// The init function of arrow log for a program which should be called only once.
   ///
@@ -204,7 +211,7 @@ class ARROW_EXPORT ArrowLog : public ArrowLogBase {
   static ArrowLogLevel severity_threshold_;
 
  protected:
-  virtual std::ostream& Stream();
+  std::ostream& Stream() override;
 };
 
 // This class make ARROW_CHECK compilation pass to change the << operator to void.
@@ -241,5 +248,3 @@ class NullLog {
 }  // namespace arrow
 
 #endif  // GANDIVA_IR
-
-#endif  // ARROW_UTIL_LOGGING_H

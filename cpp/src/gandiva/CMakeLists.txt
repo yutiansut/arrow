@@ -25,10 +25,20 @@ add_custom_target(gandiva-benchmarks)
 
 add_dependencies(gandiva-all gandiva gandiva-tests gandiva-benchmarks)
 
-if(ARROW_DEPENDENCY_SOURCE STREQUAL "CONDA")
-  set(LLVM_ROOT $ENV{CONDA_PREFIX})
+find_package(LLVMAlt REQUIRED)
+
+if(LLVM_VERSION_MAJOR LESS "10")
+  set(GANDIVA_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+else()
+  # LLVM 10 or later requires C++ 14
+  if(CMAKE_CXX_STANDARD LESS 14)
+    set(GANDIVA_CXX_STANDARD 14)
+  else()
+    set(GANDIVA_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+  endif()
 endif()
-find_package(LLVM)
+
+add_definitions(-DGANDIVA_LLVM_VERSION=${LLVM_VERSION_MAJOR})
 
 # Set the path where the bitcode file generated, see precompiled/CMakeLists.txt
 set(GANDIVA_PRECOMPILED_BC_PATH "${CMAKE_CURRENT_BINARY_DIR}/irhelpers.bc")
@@ -42,6 +52,7 @@ set_source_files_properties(${GANDIVA_PRECOMPILED_CC_PATH} PROPERTIES GENERATED 
 set(SRC_FILES
     annotator.cc
     bitmap_accumulator.cc
+    cache.cc
     cast_time.cc
     configuration.cc
     context_helper.cc
@@ -69,21 +80,23 @@ set(SRC_FILES
     llvm_generator.cc
     llvm_types.cc
     like_holder.cc
+    literal_holder.cc
     projector.cc
     regex_util.cc
     selection_vector.cc
     tree_expr_builder.cc
     to_date_holder.cc
+    random_generator_holder.cc
     ${GANDIVA_PRECOMPILED_CC_PATH})
 
-set(GANDIVA_SHARED_PRIVATE_LINK_LIBS arrow_shared LLVM::LLVM_INTERFACE RE2::re2)
+set(GANDIVA_SHARED_PRIVATE_LINK_LIBS arrow_shared LLVM::LLVM_INTERFACE)
 
-set(GANDIVA_STATIC_LINK_LIBS arrow_static LLVM::LLVM_INTERFACE RE2::re2)
+set(GANDIVA_STATIC_LINK_LIBS arrow_static LLVM::LLVM_INTERFACE)
 
 if(ARROW_GANDIVA_STATIC_LIBSTDCPP
    AND (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX))
   set(GANDIVA_STATIC_LINK_LIBS ${GANDIVA_STATIC_LINK_LIBS} -static-libstdc++
-      -static-libgcc)
+                               -static-libgcc)
 endif()
 
 # if (MSVC)
@@ -94,10 +107,25 @@ endif()
 #     set(GANDIVA_SHARED_LINK_FLAGS "${GANDIVA_SHARED_LINK_FLAGS} /EXPORT:${SYMBOL}")
 #   endforeach()
 # endif()
+if(NOT APPLE AND NOT MSVC_TOOLCHAIN)
+  # Localize thirdparty symbols using a linker version script. This hides them
+  # from the client application. The OS X linker does not support the
+  # version-script option.
+  set(GANDIVA_VERSION_SCRIPT_FLAGS
+      "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/symbols.map")
+  set(GANDIVA_SHARED_LINK_FLAGS
+      "${GANDIVA_SHARED_LINK_FLAGS} ${GANDIVA_VERSION_SCRIPT_FLAGS}")
+endif()
 
 add_arrow_lib(gandiva
+              CMAKE_PACKAGE_NAME
+              Gandiva
+              PKG_CONFIG_NAME
+              gandiva
               SOURCES
               ${SRC_FILES}
+              PRECOMPILED_HEADERS
+              "$<$<COMPILE_LANGUAGE:CXX>:gandiva/pch.h>"
               OUTPUTS
               GANDIVA_LIBRARIES
               DEPENDENCIES
@@ -116,6 +144,7 @@ add_arrow_lib(gandiva
 
 foreach(LIB_TARGET ${GANDIVA_LIBRARIES})
   target_compile_definitions(${LIB_TARGET} PRIVATE GANDIVA_EXPORTING)
+  set_target_properties(${LIB_TARGET} PROPERTIES CXX_STANDARD ${GANDIVA_CXX_STANDARD})
 endforeach()
 
 if(ARROW_BUILD_STATIC AND WIN32)
@@ -124,18 +153,11 @@ endif()
 
 add_dependencies(gandiva ${GANDIVA_LIBRARIES})
 
-# install for gandiva
-include(GNUInstallDirs)
-
-# install the header files.
 arrow_install_all_headers("gandiva")
 
-# pkg-config support
-arrow_add_pkg_config("gandiva")
+set(GANDIVA_STATIC_TEST_LINK_LIBS gandiva_static ${ARROW_TEST_LINK_LIBS})
 
-set(GANDIVA_STATIC_TEST_LINK_LIBS gandiva_static RE2::re2 ${ARROW_TEST_LINK_LIBS})
-
-set(GANDIVA_SHARED_TEST_LINK_LIBS gandiva_shared RE2::re2 ${ARROW_TEST_LINK_LIBS})
+set(GANDIVA_SHARED_TEST_LINK_LIBS gandiva_shared ${ARROW_TEST_LINK_LIBS})
 
 function(ADD_GANDIVA_TEST REL_TEST_NAME)
   set(options USE_STATIC_LINKING)
@@ -161,41 +183,54 @@ function(ADD_GANDIVA_TEST REL_TEST_NAME)
 
   # and uses less disk space, but in some cases we need to force static
   # linking (see rationale below).
-  if(ARG_USE_STATIC_LINKING)
-    add_test_case(${REL_TEST_NAME} ${TEST_ARGUMENTS} STATIC_LINK_LIBS
-                  ${GANDIVA_STATIC_TEST_LINK_LIBS})
+  if(ARG_USE_STATIC_LINKING OR ARROW_TEST_LINKAGE STREQUAL "static")
+    add_test_case(${REL_TEST_NAME}
+                  ${TEST_ARGUMENTS}
+                  STATIC_LINK_LIBS
+                  ${GANDIVA_STATIC_TEST_LINK_LIBS}
+                  ${ARG_UNPARSED_ARGUMENTS})
   else()
-    add_test_case(${REL_TEST_NAME} ${TEST_ARGUMENTS} STATIC_LINK_LIBS
-                  ${GANDIVA_SHARED_TEST_LINK_LIBS})
+    add_test_case(${REL_TEST_NAME}
+                  ${TEST_ARGUMENTS}
+                  STATIC_LINK_LIBS
+                  ${GANDIVA_SHARED_TEST_LINK_LIBS}
+                  ${ARG_UNPARSED_ARGUMENTS})
   endif()
 
-  set(TARGET_NAME gandiva-${REL_TEST_NAME})
-
-  if((TARGET ${TARGET_NAME})
-     AND (${REL_TEST_NAME} MATCHES "llvm"
-          OR ${REL_TEST_NAME} MATCHES "expression_registry"))
-    # If the unit test has llvm in its name, include llvm.
-    add_dependencies(${TARGET_NAME} LLVM::LLVM_INTERFACE)
-    target_link_libraries(${TARGET_NAME} PRIVATE LLVM::LLVM_INTERFACE)
-  endif()
+  set(TEST_NAME gandiva-${REL_TEST_NAME})
+  string(REPLACE "_" "-" TEST_NAME ${TEST_NAME})
+  set_target_properties(${TEST_NAME} PROPERTIES CXX_STANDARD ${GANDIVA_CXX_STANDARD})
 endfunction()
 
-add_gandiva_test(bitmap_accumulator_test)
-add_gandiva_test(engine_llvm_test)
-add_gandiva_test(function_signature_test)
-add_gandiva_test(function_registry_test)
-add_gandiva_test(llvm_types_test)
-add_gandiva_test(llvm_generator_test)
-add_gandiva_test(annotator_test)
-add_gandiva_test(tree_expr_test)
-add_gandiva_test(expr_decomposer_test)
-add_gandiva_test(expression_registry_test)
-add_gandiva_test(selection_vector_test)
-add_gandiva_test(lru_cache_test)
-add_gandiva_test(to_date_holder_test)
-add_gandiva_test(simple_arena_test)
-add_gandiva_test(like_holder_test)
-add_gandiva_test(decimal_type_util_test)
+set(GANDIVA_INTERNALS_TEST_ARGUMENTS)
+if(WIN32)
+  list(APPEND GANDIVA_INTERNALS_TEST_ARGUMENTS EXTRA_LINK_LIBS LLVM::LLVM_INTERFACE)
+endif()
+add_gandiva_test(internals-test
+                 SOURCES
+                 bitmap_accumulator_test.cc
+                 engine_llvm_test.cc
+                 function_registry_test.cc
+                 function_signature_test.cc
+                 llvm_types_test.cc
+                 llvm_generator_test.cc
+                 annotator_test.cc
+                 tree_expr_test.cc
+                 expr_decomposer_test.cc
+                 expression_registry_test.cc
+                 selection_vector_test.cc
+                 lru_cache_test.cc
+                 to_date_holder_test.cc
+                 simple_arena_test.cc
+                 like_holder_test.cc
+                 decimal_type_util_test.cc
+                 random_generator_holder_test.cc
+                 gdv_function_stubs_test.cc
+                 EXTRA_DEPENDENCIES
+                 LLVM::LLVM_INTERFACE
+                 EXTRA_INCLUDES
+                 $<TARGET_PROPERTY:LLVM::LLVM_INTERFACE,INTERFACE_INCLUDE_DIRECTORIES>
+                 ${GANDIVA_INTERNALS_TEST_ARGUMENTS})
 
 if(ARROW_GANDIVA_JAVA)
   add_subdirectory(jni)

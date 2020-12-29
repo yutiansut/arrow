@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef GANDIVA_COMPILED_EXPR_H
-#define GANDIVA_COMPILED_EXPR_H
+#pragma once
 
 #include <vector>
 #include "gandiva/llvm_includes.h"
@@ -25,7 +24,7 @@
 
 namespace gandiva {
 
-using EvalFunc = int (*)(uint8_t** buffers, uint8_t** local_bitmaps,
+using EvalFunc = int (*)(uint8_t** buffers, int64_t* offsets, uint8_t** local_bitmaps,
                          const uint8_t* selection_buffer, int64_t execution_ctx_ptr,
                          int64_t record_count);
 
@@ -70,5 +69,3 @@ class CompiledExpr {
 };
 
 }  // namespace gandiva
-
-#endif  // GANDIVA_COMPILED_EXPR_H

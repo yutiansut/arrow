@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_ORC_CONVERTER_H
-#define ARROW_ORC_CONVERTER_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -109,7 +108,7 @@ class ARROW_EXPORT ORCFileReader {
   Status Seek(int64_t row_number);
 
   /// \brief Get a stripe level record batch iterator with specified row count
-  ///         in each record batch. NextStripeReader serves as an fine grain
+  ///         in each record batch. NextStripeReader serves as a fine grain
   ///         alternative to ReadStripe which may cause OOM issue by loading
   ///         the whole stripes into memory.
   ///
@@ -119,7 +118,7 @@ class ARROW_EXPORT ORCFileReader {
   Status NextStripeReader(int64_t batch_size, std::shared_ptr<RecordBatchReader>* out);
 
   /// \brief Get a stripe level record batch iterator with specified row count
-  ///         in each record batch. NextStripeReader serves as an fine grain
+  ///         in each record batch. NextStripeReader serves as a fine grain
   ///         alternative to ReadStripe which may cause OOM issue by loading
   ///         the whole stripes into memory.
   ///
@@ -148,5 +147,3 @@ class ARROW_EXPORT ORCFileReader {
 }  // namespace adapters
 
 }  // namespace arrow
-
-#endif  // ARROW_ORC_CONVERTER_H

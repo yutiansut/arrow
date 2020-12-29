@@ -102,12 +102,16 @@ public class ${holderMode}${name}HolderReaderImpl extends AbstractFieldReader {
   </#if>
 
   <#if type.major == "VarLen">
+    <#if type.width == 4>
     int length = holder.end - holder.start;
+    <#elseif type.width == 8>
+    int length = (int) (holder.end - holder.start);
+    </#if>
     byte[] value = new byte [length];
     holder.buffer.getBytes(holder.start, value, 0, length);
-    <#if minor.class == "VarBinary">
+    <#if minor.class == "VarBinary" || minor.class == "LargeVarBinary">
     return value;
-    <#elseif minor.class == "VarChar">
+    <#elseif minor.class == "VarChar" || minor.class == "LargeVarChar">
     Text text = new Text();
     text.set(value);
     return text;
@@ -116,9 +120,16 @@ public class ${holderMode}${name}HolderReaderImpl extends AbstractFieldReader {
     return Duration.ofDays(holder.days).plusMillis(holder.milliseconds);
   <#elseif minor.class == "IntervalYear">
     return Period.ofMonths(holder.value);
+  <#elseif minor.class == "Duration">
+    return DurationVector.toDuration(holder.value, holder.unit);
   <#elseif minor.class == "Bit" >
     return new Boolean(holder.value != 0);
   <#elseif minor.class == "Decimal">
+    byte[] bytes = new byte[${type.width}];
+    holder.buffer.getBytes(holder.start, bytes, 0, ${type.width});
+    ${friendlyType} value = new BigDecimal(new BigInteger(bytes), holder.scale);
+    return value;
+  <#elseif minor.class == "Decimal256">
     byte[] bytes = new byte[${type.width}];
     holder.buffer.getBytes(holder.start, bytes, 0, ${type.width});
     ${friendlyType} value = new BigDecimal(new BigInteger(bytes), holder.scale);

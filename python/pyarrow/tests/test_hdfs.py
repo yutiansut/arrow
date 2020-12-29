@@ -17,26 +17,29 @@
 
 import os
 import pickle
-import pytest
 import random
 import unittest
-
 from io import BytesIO
 from os.path import join as pjoin
 
 import numpy as np
+import pytest
+
 import pyarrow as pa
-import pyarrow.tests.test_parquet as test_parquet
-
-from pyarrow.compat import guid
 from pyarrow.pandas_compat import _pandas_api
-
+from pyarrow.tests import util
+from pyarrow.tests.parquet.common import _test_dataframe
+from pyarrow.tests.parquet.test_dataset import (
+    _test_read_common_metadata_files, _test_write_to_dataset_with_partitions,
+    _test_write_to_dataset_no_partitions
+)
+from pyarrow.util import guid
 
 # ----------------------------------------------------------------------
 # HDFS tests
 
 
-def hdfs_test_client(driver='libhdfs'):
+def hdfs_test_client():
     host = os.environ.get('ARROW_HDFS_TEST_HOST', 'default')
     user = os.environ.get('ARROW_HDFS_TEST_USER', None)
     try:
@@ -45,11 +48,12 @@ def hdfs_test_client(driver='libhdfs'):
         raise ValueError('Env variable ARROW_HDFS_TEST_PORT was not '
                          'an integer')
 
-    return pa.hdfs.connect(host, port, user, driver=driver)
+    with pytest.warns(DeprecationWarning):
+        return pa.hdfs.connect(host, port, user)
 
 
 @pytest.mark.hdfs
-class HdfsTestCases(object):
+class HdfsTestCases:
 
     def _make_test_file(self, hdfs, test_name, test_path, test_data):
         base_path = pjoin(self.tmp_path, test_name)
@@ -65,18 +69,14 @@ class HdfsTestCases(object):
     @classmethod
     def setUpClass(cls):
         cls.check_driver()
-        cls.hdfs = hdfs_test_client(cls.DRIVER)
-        cls.tmp_path = '/tmp/pyarrow-test-{0}'.format(random.randint(0, 1000))
+        cls.hdfs = hdfs_test_client()
+        cls.tmp_path = '/tmp/pyarrow-test-{}'.format(random.randint(0, 1000))
         cls.hdfs.mkdir(cls.tmp_path)
 
     @classmethod
     def tearDownClass(cls):
         cls.hdfs.delete(cls.tmp_path, recursive=True)
         cls.hdfs.close()
-
-    def test_unknown_driver(self):
-        with pytest.raises(ValueError):
-            hdfs_test_client(driver="not_a_driver_name")
 
     def test_pickle(self):
         s = pickle.dumps(self.hdfs)
@@ -86,7 +86,6 @@ class HdfsTestCases(object):
         assert h2.port == self.hdfs.port
         assert h2.user == self.hdfs.user
         assert h2.kerb_ticket == self.hdfs.kerb_ticket
-        assert h2.driver == self.hdfs.driver
         # smoketest unpickled client works
         h2.ls(self.tmp_path)
 
@@ -279,14 +278,14 @@ class HdfsTestCases(object):
         size = 5
         test_data = []
         for i in range(nfiles):
-            df = test_parquet._test_dataframe(size, seed=i)
+            df = _test_dataframe(size, seed=i)
 
             df['index'] = np.arange(i * size, (i + 1) * size)
 
             # Hack so that we don't have a dtype cast in v1 files
             df['uint32'] = df['uint32'].astype(np.int64)
 
-            path = pjoin(tmpdir, '{0}.parquet'.format(i))
+            path = pjoin(tmpdir, '{}.parquet'.format(i))
 
             table = pa.Table.from_pandas(df, preserve_index=False)
             with self.hdfs.open(path, 'wb') as f:
@@ -324,7 +323,8 @@ class HdfsTestCases(object):
 
         expected = self._write_multiple_hdfs_pq_files(tmpdir)
         path = _get_hdfs_uri(tmpdir)
-        result = pq.read_table(path)
+        # TODO for URI it should not be needed to pass this argument
+        result = pq.read_table(path, use_legacy_dataset=True)
 
         _pandas_api.assert_frame_equal(result.to_pandas()
                                        .sort_values(by='index')
@@ -341,46 +341,53 @@ class HdfsTestCases(object):
         path = _get_hdfs_uri(pjoin(tmpdir, 'test.parquet'))
 
         size = 5
-        df = test_parquet._test_dataframe(size, seed=0)
+        df = _test_dataframe(size, seed=0)
         # Hack so that we don't have a dtype cast in v1 files
         df['uint32'] = df['uint32'].astype(np.int64)
         table = pa.Table.from_pandas(df, preserve_index=False)
 
         pq.write_table(table, path, filesystem=self.hdfs)
 
-        result = pq.read_table(path, filesystem=self.hdfs).to_pandas()
+        result = pq.read_table(
+            path, filesystem=self.hdfs, use_legacy_dataset=True
+        ).to_pandas()
 
         _pandas_api.assert_frame_equal(result, df)
 
     @pytest.mark.parquet
+    @pytest.mark.pandas
     def test_read_common_metadata_files(self):
         tmpdir = pjoin(self.tmp_path, 'common-metadata-' + guid())
         self.hdfs.mkdir(tmpdir)
-        test_parquet._test_read_common_metadata_files(self.hdfs, tmpdir)
+        _test_read_common_metadata_files(self.hdfs, tmpdir)
 
     @pytest.mark.parquet
+    @pytest.mark.pandas
     def test_write_to_dataset_with_partitions(self):
         tmpdir = pjoin(self.tmp_path, 'write-partitions-' + guid())
         self.hdfs.mkdir(tmpdir)
-        test_parquet._test_write_to_dataset_with_partitions(
+        _test_write_to_dataset_with_partitions(
             tmpdir, filesystem=self.hdfs)
 
     @pytest.mark.parquet
+    @pytest.mark.pandas
     def test_write_to_dataset_no_partitions(self):
         tmpdir = pjoin(self.tmp_path, 'write-no_partitions-' + guid())
         self.hdfs.mkdir(tmpdir)
-        test_parquet._test_write_to_dataset_no_partitions(
+        _test_write_to_dataset_no_partitions(
             tmpdir, filesystem=self.hdfs)
 
 
 class TestLibHdfs(HdfsTestCases, unittest.TestCase):
 
-    DRIVER = 'libhdfs'
-
     @classmethod
     def check_driver(cls):
         if not pa.have_libhdfs():
-            pytest.skip('No libhdfs available on system')
+            message = 'No libhdfs available on system'
+            if os.environ.get('PYARROW_HDFS_TEST_LIBHDFS_REQUIRE'):
+                pytest.fail(message)
+            else:
+                pytest.skip(message)
 
     def test_orphaned_file(self):
         hdfs = hdfs_test_client()
@@ -390,16 +397,6 @@ class TestLibHdfs(HdfsTestCases, unittest.TestCase):
         f = hdfs.open(file_path)
         hdfs = None
         f = None  # noqa
-
-
-class TestLibHdfs3(HdfsTestCases, unittest.TestCase):
-
-    DRIVER = 'libhdfs3'
-
-    @classmethod
-    def check_driver(cls):
-        if not pa.have_libhdfs3():
-            pytest.skip('No libhdfs3 available on system')
 
 
 def _get_hdfs_uri(path):
@@ -414,12 +411,12 @@ def _get_hdfs_uri(path):
     return uri
 
 
+@pytest.mark.hdfs
 @pytest.mark.pandas
 @pytest.mark.parquet
 @pytest.mark.fastparquet
-@pytest.mark.parametrize('client', ['libhdfs', 'libhdfs3'])
-def test_fastparquet_read_with_hdfs(client):
-    from pandas.util.testing import assert_frame_equal, makeDataFrame
+def test_fastparquet_read_with_hdfs():
+    from pandas.testing import assert_frame_equal
 
     try:
         import snappy  # noqa
@@ -429,9 +426,10 @@ def test_fastparquet_read_with_hdfs(client):
     import pyarrow.parquet as pq
     fastparquet = pytest.importorskip('fastparquet')
 
-    fs = hdfs_test_client(client)
+    fs = hdfs_test_client()
 
-    df = makeDataFrame()
+    df = util.make_dataframe()
+
     table = pa.Table.from_pandas(df)
 
     path = '/tmp/testing.parquet'

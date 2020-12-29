@@ -21,10 +21,11 @@
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
+use std::mem;
 
 use std::ops::{BitAnd, BitOr};
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Bitmap {
     pub(crate) bits: Buffer,
 }
@@ -38,12 +39,8 @@ impl Bitmap {
         } else {
             num_bytes + 64 - r
         };
-        let mut v = Vec::with_capacity(len);
-        for _ in 0..len {
-            v.push(255); // 1 is not null
-        }
         Bitmap {
-            bits: Buffer::from(&v[..]),
+            bits: Buffer::from(&vec![0xFF; len]),
         }
     }
 
@@ -51,9 +48,31 @@ impl Bitmap {
         self.bits.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bits.is_empty()
+    }
+
     pub fn is_set(&self, i: usize) -> bool {
         assert!(i < (self.bits.len() << 3));
         unsafe { bit_util::get_bit_raw(self.bits.raw_data(), i) }
+    }
+
+    pub fn buffer_ref(&self) -> &Buffer {
+        &self.bits
+    }
+
+    pub fn into_buffer(self) -> Buffer {
+        self.bits
+    }
+
+    /// Returns the total number of bytes of memory occupied by the buffers owned by this [Bitmap].
+    pub fn get_buffer_memory_size(&self) -> usize {
+        self.bits.capacity()
+    }
+
+    /// Returns the total number of bytes of memory occupied physically by this [Bitmap].
+    pub fn get_array_memory_size(&self) -> usize {
+        self.bits.capacity() + mem::size_of_val(self)
     }
 }
 
@@ -76,6 +95,19 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 impl From<Buffer> for Bitmap {
     fn from(buf: Buffer) -> Self {
         Self { bits: buf }
+    }
+}
+
+impl PartialEq for Bitmap {
+    fn eq(&self, other: &Self) -> bool {
+        // buffer equality considers capacity, but here we want to only compare
+        // actual data contents
+        let self_len = self.bits.len();
+        let other_len = other.bits.len();
+        if self_len != other_len {
+            return false;
+        }
+        self.bits.data()[..self_len] == other.bits.data()[..self_len]
     }
 }
 
@@ -122,5 +154,4 @@ mod tests {
         assert_eq!(true, bitmap.is_set(6));
         assert_eq!(false, bitmap.is_set(7));
     }
-
 }

@@ -17,35 +17,76 @@
 
 //! Data source traits
 
-use std::sync::{Arc, Mutex};
+use std::any::Any;
+use std::sync::Arc;
 
-use arrow::datatypes::Schema;
-use arrow::record_batch::RecordBatch;
-
+use crate::arrow::datatypes::SchemaRef;
 use crate::error::Result;
+use crate::logical_plan::Expr;
+use crate::physical_plan::ExecutionPlan;
 
-/// Returned by implementors of `Table#scan`, this `RecordBatchIterator` is wrapped with an `Arc`
-/// and `Mutex` so that it can be shared across threads as it is used.
-pub type ScanResult = Arc<Mutex<RecordBatchIterator>>;
+/// This table statistics are estimates.
+/// It can not be used directly in the precise compute
+#[derive(Debug, Clone, Default)]
+pub struct Statistics {
+    /// The number of table rows
+    pub num_rows: Option<usize>,
+    /// total byte of the table rows
+    pub total_byte_size: Option<usize>,
+    /// Statistics on a column level
+    pub column_statistics: Option<Vec<ColumnStatistics>>,
+}
+/// This table statistics are estimates about column
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColumnStatistics {
+    /// Number of null values on column
+    pub null_count: Option<usize>,
+}
+
+/// Indicates whether and how a filter expression can be handled by a
+/// TableProvider for table scans.
+#[derive(Debug, Clone)]
+pub enum TableProviderFilterPushDown {
+    /// The expression cannot be used by the provider.
+    Unsupported,
+    /// The expression can be used to help minimise the data retrieved,
+    /// but the provider cannot guarantee that all returned tuples
+    /// satisfy the filter. The Filter plan node containing this expression
+    /// will be preserved.
+    Inexact,
+    /// The provider guarantees that all returned data satisfies this
+    /// filter expression. The Filter plan node containing this expression
+    /// will be removed.
+    Exact,
+}
 
 /// Source table
 pub trait TableProvider {
-    /// Get a reference to the schema for this table
-    fn schema(&self) -> &Arc<Schema>;
+    /// Returns the table provider as [`Any`](std::any::Any) so that it can be
+    /// downcast to a specific implementation.
+    fn as_any(&self) -> &dyn Any;
 
-    /// Perform a scan of a table and return a sequence of iterators over the data (one iterator per partition)
+    /// Get a reference to the schema for this table
+    fn schema(&self) -> SchemaRef;
+
+    /// Create an ExecutionPlan that will scan the table.
     fn scan(
         &self,
         projection: &Option<Vec<usize>>,
         batch_size: usize,
-    ) -> Result<Vec<ScanResult>>;
-}
+        filters: &[Expr],
+    ) -> Result<Arc<dyn ExecutionPlan>>;
 
-/// Iterator for reading a series of record batches with a known schema
-pub trait RecordBatchIterator {
-    /// Get the schema of this iterator
-    fn schema(&self) -> &Arc<Schema>;
+    /// Returns the table Statistics
+    /// Statistics should be optional because not all data sources can provide statistics.
+    fn statistics(&self) -> Statistics;
 
-    /// Get the next batch in this iterator
-    fn next(&mut self) -> Result<Option<RecordBatch>>;
+    /// Tests whether the table provider can make use of a filter expression
+    /// to optimise data retrieval.
+    fn supports_filter_pushdown(
+        &self,
+        _filter: &Expr,
+    ) -> Result<TableProviderFilterPushDown> {
+        Ok(TableProviderFilterPushDown::Unsupported)
+    }
 }

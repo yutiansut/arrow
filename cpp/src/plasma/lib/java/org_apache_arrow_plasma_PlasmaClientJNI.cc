@@ -111,13 +111,13 @@ JNIEXPORT jobject JNICALL Java_org_apache_arrow_plasma_PlasmaClientJNI_create(
 
   std::shared_ptr<Buffer> data;
   Status s = client->Create(oid, size, md, md_size, &data);
-  if (s.IsPlasmaObjectExists()) {
+  if (plasma::IsPlasmaObjectExists(s)) {
     jclass exceptionClass =
         env->FindClass("org/apache/arrow/plasma/exceptions/DuplicateObjectException");
     env->ThrowNew(exceptionClass, oid.hex().c_str());
     return nullptr;
   }
-  if (s.IsPlasmaStoreFull()) {
+  if (plasma::IsPlasmaStoreFull(s)) {
     jclass exceptionClass =
         env->FindClass("org/apache/arrow/plasma/exceptions/PlasmaOutOfMemoryException");
     env->ThrowNew(exceptionClass, "");
@@ -240,4 +240,24 @@ JNIEXPORT jlong JNICALL Java_org_apache_arrow_plasma_PlasmaClientJNI_evict(
       env, client->Evict(static_cast<int64_t>(num_bytes), evicted_bytes));
 
   return static_cast<jlong>(evicted_bytes);
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_org_apache_arrow_plasma_PlasmaClientJNI_list(JNIEnv* env, jclass cls, jlong conn) {
+  plasma::PlasmaClient* client = reinterpret_cast<plasma::PlasmaClient*>(conn);
+  plasma::ObjectTable objectTable;
+  throw_exception_if_not_OK(env, client->List(&objectTable));
+  jobjectArray ret =
+      env->NewObjectArray(objectTable.size(), env->FindClass("[B"), env->NewByteArray(1));
+  int i = 0;
+  for (const auto& id_entry_pair : objectTable) {
+    const plasma::ObjectID& id = id_entry_pair.first;
+    jbyteArray idByteArray = env->NewByteArray(OBJECT_ID_SIZE);
+    env->SetByteArrayRegion(idByteArray, 0, OBJECT_ID_SIZE,
+                            reinterpret_cast<jbyte*>(const_cast<uint8_t*>(id.data())));
+    env->SetObjectArrayElement(ret, i, idByteArray);
+    i++;
+  }
+
+  return ret;
 }

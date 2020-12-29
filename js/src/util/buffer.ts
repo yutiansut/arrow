@@ -95,14 +95,16 @@ export function toArrayBufferView(ArrayBufferViewCtor: any, input: ArrayBufferVi
 
     let value: any = isIteratorResult(input) ? input.value : input;
 
-    if (!value) { return new ArrayBufferViewCtor(0); }
-    if (typeof value === 'string') { value = encodeUtf8(value); }
     if (value instanceof ArrayBufferViewCtor) {
-        return value.constructor === ArrayBufferViewCtor ? value :
+        if (ArrayBufferViewCtor === Uint8Array) {
             // Node's `Buffer` class passes the `instanceof Uint8Array` check, but we need
             // a real Uint8Array, since Buffer#slice isn't the same as Uint8Array#slice :/
-            new ArrayBufferViewCtor(value.buffer, value.byteOffset, value.byteLength / ArrayBufferViewCtor.BYTES_PER_ELEMENT);
+            return new ArrayBufferViewCtor(value.buffer, value.byteOffset, value.byteLength);
+        }
+        return value;
     }
+    if (!value) { return new ArrayBufferViewCtor(0); }
+    if (typeof value === 'string') { value = encodeUtf8(value); }
     if (value instanceof ArrayBuffer) { return new ArrayBufferViewCtor(value); }
     if (value instanceof SharedArrayBuf) { return new ArrayBufferViewCtor(value); }
     if (value instanceof ByteBuffer) { return toArrayBufferView(ArrayBufferViewCtor, value.bytes()); }
@@ -123,27 +125,6 @@ export function toArrayBufferView(ArrayBufferViewCtor: any, input: ArrayBufferVi
 /** @ignore */ export const toUint8ClampedArray = (input: ArrayBufferViewInput) => toArrayBufferView(Uint8ClampedArray, input);
 
 /** @ignore */
-export const toFloat16Array = (input: ArrayBufferViewInput) => {
-    let floats: Float32Array | Float64Array | null = null;
-    if (ArrayBuffer.isView(input)) {
-        switch (input.constructor) {
-            case Float32Array: floats = input as Float32Array; break;
-            case Float64Array: floats = input as Float64Array; break;
-        }
-    } else if (isIterable(input)) {
-        floats = toFloat64Array(input);
-    }
-    if (floats) {
-        const u16s = new Uint16Array(floats.length);
-        for (let i = -1, n = u16s.length; ++i < n;) {
-            u16s[i] = (floats[i] * 32767) + 32767;
-        }
-        return u16s;
-    }
-    return toUint16Array(input);
-};
-
-/** @ignore */
 type ArrayBufferViewIteratorInput = Iterable<ArrayBufferViewInput> | ArrayBufferViewInput;
 
 /** @ignore */
@@ -160,12 +141,13 @@ export function* toArrayBufferViewIterator<T extends TypedArray>(ArrayCtor: Type
            : (source instanceof SharedArrayBuf) ? wrap(source)
     : !isIterable<ArrayBufferViewInput>(source) ? wrap(source) : source;
 
-    yield* pump((function* (it) {
+    yield* pump((function* (it: Iterator<ArrayBufferViewInput, any, number | undefined>): Generator<T, void, number | undefined> {
         let r: IteratorResult<any> = <any> null;
         do {
             r = it.next(yield toArrayBufferView(ArrayCtor, r));
         } while (!r.done);
     })(buffers[Symbol.iterator]()));
+    return new ArrayCtor();
 }
 
 /** @ignore */ export const toInt8ArrayIterator = (input: ArrayBufferViewIteratorInput) => toArrayBufferViewIterator(Int8Array, input);
@@ -182,7 +164,7 @@ export function* toArrayBufferViewIterator<T extends TypedArray>(ArrayCtor: Type
 type ArrayBufferViewAsyncIteratorInput = AsyncIterable<ArrayBufferViewInput> | Iterable<ArrayBufferViewInput> | PromiseLike<ArrayBufferViewInput> | ArrayBufferViewInput;
 
 /** @ignore */
-export async function* toArrayBufferViewAsyncIterator<T extends TypedArray>(ArrayCtor: TypedArrayConstructor<T>, source: ArrayBufferViewAsyncIteratorInput): AsyncIterableIterator<T> {
+export async function* toArrayBufferViewAsyncIterator<T extends TypedArray>(ArrayCtor: TypedArrayConstructor<T>, source: ArrayBufferViewAsyncIteratorInput): AsyncGenerator<T, T, number | undefined> {
 
     // if a Promise, unwrap the Promise and iterate the resolved value
     if (isPromise<ArrayBufferViewInput>(source)) {
@@ -208,12 +190,13 @@ export async function* toArrayBufferViewAsyncIterator<T extends TypedArray>(Arra
     : !isAsyncIterable<ArrayBufferViewInput>(source) ? wrap(source) // If not an AsyncIterable, treat as a sentinel and wrap in an AsyncIterableIterator
                                                      : source; // otherwise if AsyncIterable, use it
 
-    yield* pump((async function* (it) {
+    yield* pump((async function* (it: AsyncIterator<ArrayBufferViewInput, any, number | undefined>): AsyncGenerator<T, void, number | undefined> {
         let r: IteratorResult<any> = <any> null;
         do {
             r = await it.next(yield toArrayBufferView(ArrayCtor, r));
         } while (!r.done);
     })(buffers[Symbol.asyncIterator]()));
+    return new ArrayCtor();
 }
 
 /** @ignore */ export const toInt8ArrayAsyncIterator = (input: ArrayBufferViewAsyncIteratorInput) => toArrayBufferViewAsyncIterator(Int8Array, input);

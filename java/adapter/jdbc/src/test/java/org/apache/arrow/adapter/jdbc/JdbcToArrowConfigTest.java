@@ -25,13 +25,13 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.TimeZone;
 
-import org.apache.arrow.memory.BaseAllocator;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.junit.Test;
 
 public class JdbcToArrowConfigTest {
 
-  private static final RootAllocator allocator = new RootAllocator(Integer.MAX_VALUE);
+  private static final BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE);
   private static final Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT);
 
   @Test(expected = NullPointerException.class)
@@ -44,6 +44,7 @@ public class JdbcToArrowConfigTest {
     new JdbcToArrowConfigBuilder(null, null);
   }
 
+  @Test
   public void testConfigNullCalendar() {
     JdbcToArrowConfig config = new JdbcToArrowConfig(allocator, null);
     assertNull(config.getCalendar());
@@ -88,7 +89,7 @@ public class JdbcToArrowConfigTest {
     assertTrue(calendar == config.getCalendar());
 
     Calendar newCalendar = Calendar.getInstance();
-    BaseAllocator newAllocator = new RootAllocator(Integer.SIZE);
+    BufferAllocator newAllocator = new RootAllocator(Integer.SIZE);
 
     builder.setAllocator(newAllocator).setCalendar(newCalendar);
     config = builder.build();
@@ -111,10 +112,12 @@ public class JdbcToArrowConfigTest {
     config = new JdbcToArrowConfigBuilder(allocator, calendar, true).build();
     assertTrue(config.shouldIncludeMetadata());
 
-    config = new JdbcToArrowConfig(allocator, calendar, true, null, null);
+    config = new JdbcToArrowConfig(allocator, calendar, true, null,
+        null, JdbcToArrowConfig.NO_LIMIT_BATCH_SIZE);
     assertTrue(config.shouldIncludeMetadata());
 
-    config = new JdbcToArrowConfig(allocator, calendar, false, null, null);
+    config = new JdbcToArrowConfig(allocator, calendar, false, null,
+        null, JdbcToArrowConfig.NO_LIMIT_BATCH_SIZE);
     assertFalse(config.shouldIncludeMetadata());
   }
 

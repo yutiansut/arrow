@@ -23,11 +23,14 @@
 install(FILES adapter.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/arrow/adapters/orc")
 
 # pkg-config support
-configure_file(arrow-orc.pc.in "${CMAKE_CURRENT_BINARY_DIR}/arrow-orc.pc" @ONLY)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/arrow-orc.pc"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+arrow_add_pkg_config("arrow-orc")
 
-set(ORC_MIN_TEST_LIBS GTest::Main GTest::GTest)
+set(ORC_MIN_TEST_LIBS
+    GTest::gtest_main
+    GTest::gtest
+    Snappy::snappy
+    LZ4::lz4
+    ZLIB::ZLIB)
 
 if(ARROW_BUILD_STATIC)
   set(ARROW_LIBRARIES_FOR_STATIC_TESTS arrow_testing_static arrow_static)
@@ -41,7 +44,18 @@ elseif(NOT MSVC)
   set(ORC_MIN_TEST_LIBS ${ORC_MIN_TEST_LIBS} pthread ${CMAKE_DL_LIBS})
 endif()
 
-set(ORC_STATIC_TEST_LINK_LIBS ${ORC_MIN_TEST_LIBS} ${ARROW_LIBRARIES_FOR_STATIC_TESTS}
-    orc_static)
+set(ORC_STATIC_TEST_LINK_LIBS orc::liborc ${ARROW_LIBRARIES_FOR_STATIC_TESTS}
+                              ${ORC_MIN_TEST_LIBS})
 
-add_arrow_test(adapter-test PREFIX "orc" STATIC_LINK_LIBS ${ORC_STATIC_TEST_LINK_LIBS})
+add_arrow_test(adapter_test
+               PREFIX
+               "arrow-orc"
+               STATIC_LINK_LIBS
+               ${ORC_STATIC_TEST_LINK_LIBS})
+
+set_source_files_properties(adapter_test.cc
+                            PROPERTIES
+                            SKIP_PRECOMPILE_HEADERS
+                            ON
+                            SKIP_UNITY_BUILD_INCLUSION
+                            ON)

@@ -20,7 +20,7 @@ import (
 	"testing"
 )
 
-func TestTypeEquals(t *testing.T) {
+func TestTypeEqual(t *testing.T) {
 	tests := []struct {
 		left, right   DataType
 		want          bool
@@ -40,6 +40,9 @@ func TestTypeEquals(t *testing.T) {
 		},
 		{
 			Null, Null, true, false,
+		},
+		{
+			&BinaryType{}, &StringType{}, false, false,
 		},
 		{
 			&Time32Type{Unit: Second}, &Time32Type{Unit: Second}, true, false,
@@ -143,9 +146,40 @@ func TestTypeEquals(t *testing.T) {
 					Field{Name: "f1", Type: PrimitiveTypes.Uint32, Nullable: true},
 					Field{Name: "f2", Type: PrimitiveTypes.Uint32, Nullable: true},
 				},
-				index: map[string]int{"f1": 0, "f2": 0},
+				index: map[string]int{"f1": 0, "f2": 1},
 			},
 			false, true,
+		},
+		{
+			&StructType{
+				fields: []Field{
+					Field{Name: "f1", Type: PrimitiveTypes.Uint32, Nullable: true},
+				},
+				index: map[string]int{"f1": 0},
+			},
+			&StructType{
+				fields: []Field{
+					Field{Name: "f1", Type: PrimitiveTypes.Uint32, Nullable: true},
+					Field{Name: "f2", Type: PrimitiveTypes.Uint32, Nullable: true},
+				},
+				index: map[string]int{"f1": 0, "f2": 1},
+			},
+			false, false,
+		},
+		{
+			&StructType{
+				fields: []Field{
+					Field{Name: "f1", Type: PrimitiveTypes.Uint32, Nullable: true},
+				},
+				index: map[string]int{"f1": 0},
+			},
+			&StructType{
+				fields: []Field{
+					Field{Name: "f2", Type: PrimitiveTypes.Uint32, Nullable: true},
+				},
+				index: map[string]int{"f2": 0},
+			},
+			false, false,
 		},
 		{
 			&StructType{
@@ -240,12 +274,12 @@ func TestTypeEquals(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			var got bool
 			if test.checkMetadata {
-				got = TypeEquals(test.left, test.right, CheckMetadata())
+				got = TypeEqual(test.left, test.right, CheckMetadata())
 			} else {
-				got = TypeEquals(test.left, test.right)
+				got = TypeEqual(test.left, test.right)
 			}
 			if got != test.want {
-				t.Fatalf("TypeEquals(%v, %v, %v): got=%v, want=%v", test.left, test.right, test.checkMetadata, got, test.want)
+				t.Fatalf("TypeEqual(%v, %v, %v): got=%v, want=%v", test.left, test.right, test.checkMetadata, got, test.want)
 			}
 		})
 	}

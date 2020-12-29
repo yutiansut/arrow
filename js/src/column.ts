@@ -19,12 +19,11 @@ import { Data } from './data';
 import { Field } from './schema';
 import { DataType } from './type';
 import { Vector } from './vector';
-import { VectorCtorArgs, Vector as V } from './interfaces';
 import { Clonable, Sliceable, Applicative } from './vector';
+import { VectorCtorArgs, VectorType as V } from './interfaces';
 import { Chunked, SearchContinuation } from './vector/chunked';
 
 export interface Column<T extends DataType = any> {
-    typeId: T['TType'];
     concat(...others: Vector<T>[]): Column<T>;
     slice(begin?: number, end?: number): Column<T>;
     clone(chunks?: Vector<T>[], offsets?: Uint32Array): Column<T>;
@@ -36,10 +35,22 @@ export class Column<T extends DataType = any>
                Sliceable<Column<T>>,
                Applicative<T, Column<T>> {
 
+    public static new<T extends DataType>(data: Data<T>, ...args: VectorCtorArgs<V<T>>): Column<T>;
     public static new<T extends DataType>(field: string | Field<T>, ...chunks: (Vector<T> | Vector<T>[])[]): Column<T>;
     public static new<T extends DataType>(field: string | Field<T>, data: Data<T>, ...args: VectorCtorArgs<V<T>>): Column<T>;
     /** @nocollapse */
-    public static new<T extends DataType = any>(field: string | Field<T>, data: Data<T> | Vector<T> | (Data<T> | Vector<T>)[], ...rest: any[]) {
+    public static new<T extends DataType = any>(...args: any[]) {
+
+        let [field, data, ...rest] = args as [
+            string | Field<T>,
+            Data<T> | Vector<T> | (Data<T> | Vector<T>)[],
+            ...any[]
+        ];
+
+        if (typeof field !== 'string' && !(field instanceof Field)) {
+            data = <Data<T> | Vector<T> | (Data<T> | Vector<T>)[]> field;
+            field = '';
+        }
 
         const chunks = Chunked.flatten<T>(
             Array.isArray(data) ? [...data, ...rest] :
@@ -49,7 +60,7 @@ export class Column<T extends DataType = any>
 
         if (typeof field === 'string') {
             const type = chunks[0].data.type;
-            field = new Field(field, type, chunks.some(({ nullCount }) => nullCount > 0));
+            field = new Field(field, type, true);
         } else if (!field.nullable && chunks.some(({ nullCount }) => nullCount > 0)) {
             field = field.clone({ nullable: true });
         }
@@ -98,6 +109,7 @@ export class Column<T extends DataType = any>
     }
 }
 
+/** @ignore */
 class SingleChunkColumn<T extends DataType = any> extends Column<T> {
     protected _chunk: Vector<T>;
     constructor(field: Field<T>, vector: Vector<T>, offsets?: Uint32Array) {

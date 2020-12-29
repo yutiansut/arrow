@@ -36,15 +36,21 @@ files into Arrow structures.
    install
    memory
    data
+   compute
    ipc
    filesystems
+   filesystems_deprecated
    plasma
    numpy
    pandas
    timestamps
    csv
+   feather
+   json
    parquet
+   dataset
    cuda
+   extending_types
    extending
    api
    getting_involved

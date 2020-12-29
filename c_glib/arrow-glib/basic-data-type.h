@@ -19,7 +19,7 @@
 
 #pragma once
 
-#include <arrow-glib/decimal128.h>
+#include <arrow-glib/decimal.h>
 #include <arrow-glib/type.h>
 #include <arrow-glib/version.h>
 
@@ -111,6 +111,8 @@ struct _GArrowIntegerDataTypeClass
   GArrowNumericDataTypeClass parent_class;
 };
 
+GARROW_AVAILABLE_IN_0_16
+gboolean garrow_integer_data_type_is_signed(GArrowIntegerDataType *data_type);
 
 #define GARROW_TYPE_INT8_DATA_TYPE (garrow_int8_data_type_get_type())
 G_DECLARE_DERIVABLE_TYPE(GArrowInt8DataType,
@@ -298,18 +300,48 @@ gint32
 garrow_fixed_size_binary_data_type_get_byte_width(GArrowFixedSizeBinaryDataType *data_type);
 
 
+#define GARROW_TYPE_LARGE_BINARY_DATA_TYPE (garrow_large_binary_data_type_get_type())
+G_DECLARE_DERIVABLE_TYPE(GArrowLargeBinaryDataType,
+                         garrow_large_binary_data_type,
+                         GARROW,
+                         LARGE_BINARY_DATA_TYPE,
+                         GArrowDataType)
+struct _GArrowLargeBinaryDataTypeClass
+{
+  GArrowDataTypeClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_0_17
+GArrowLargeBinaryDataType *garrow_large_binary_data_type_new(void);
+
+
 #define GARROW_TYPE_STRING_DATA_TYPE (garrow_string_data_type_get_type())
 G_DECLARE_DERIVABLE_TYPE(GArrowStringDataType,
                          garrow_string_data_type,
                          GARROW,
                          STRING_DATA_TYPE,
-                         GArrowDataType)
+                         GArrowBinaryDataType)
 struct _GArrowStringDataTypeClass
 {
-  GArrowDataTypeClass parent_class;
+  GArrowBinaryDataTypeClass parent_class;
 };
 
 GArrowStringDataType *garrow_string_data_type_new      (void);
+
+
+#define GARROW_TYPE_LARGE_STRING_DATA_TYPE (garrow_large_string_data_type_get_type())
+G_DECLARE_DERIVABLE_TYPE(GArrowLargeStringDataType,
+                         garrow_large_string_data_type,
+                         GARROW,
+                         LARGE_STRING_DATA_TYPE,
+                         GArrowLargeBinaryDataType)
+struct _GArrowLargeStringDataTypeClass
+{
+  GArrowLargeBinaryDataTypeClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_0_17
+GArrowLargeStringDataType *garrow_large_string_data_type_new(void);
 
 
 #define GARROW_TYPE_DATE32_DATA_TYPE (garrow_date32_data_type_get_type())
@@ -431,8 +463,32 @@ struct _GArrowDecimal128DataTypeClass
   GArrowDecimalDataTypeClass parent_class;
 };
 
+GARROW_AVAILABLE_IN_3_0
+gint32
+garrow_decimal128_data_type_max_precision();
+
 GARROW_AVAILABLE_IN_0_12
 GArrowDecimal128DataType *
 garrow_decimal128_data_type_new(gint32 precision, gint32 scale);
+
+
+#define GARROW_TYPE_DECIMAL256_DATA_TYPE (garrow_decimal256_data_type_get_type())
+G_DECLARE_DERIVABLE_TYPE(GArrowDecimal256DataType,
+                         garrow_decimal256_data_type,
+                         GARROW,
+                         DECIMAL256_DATA_TYPE,
+                         GArrowDecimalDataType)
+struct _GArrowDecimal256DataTypeClass
+{
+  GArrowDecimalDataTypeClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_3_0
+gint32
+garrow_decimal256_data_type_max_precision();
+
+GARROW_AVAILABLE_IN_3_0
+GArrowDecimal256DataType *
+garrow_decimal256_data_type_new(gint32 precision, gint32 scale);
 
 G_END_DECLS

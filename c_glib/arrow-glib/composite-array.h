@@ -47,6 +47,56 @@ GArrowListArray *garrow_list_array_new(GArrowDataType *data_type,
 GArrowDataType *garrow_list_array_get_value_type(GArrowListArray *array);
 GArrowArray *garrow_list_array_get_value(GArrowListArray *array,
                                          gint64 i);
+GARROW_AVAILABLE_IN_2_0
+GArrowArray *garrow_list_array_get_values(GArrowListArray *array);
+GARROW_AVAILABLE_IN_2_0
+gint32 garrow_list_array_get_value_offset(GArrowListArray *array,
+                                          gint64 i);
+GARROW_AVAILABLE_IN_2_0
+gint32 garrow_list_array_get_value_length(GArrowListArray *array,
+                                          gint64 i);
+GARROW_AVAILABLE_IN_2_0
+const gint32 *
+garrow_list_array_get_value_offsets(GArrowListArray *array,
+                                    gint64 *n_offsets);
+
+
+#define GARROW_TYPE_LARGE_LIST_ARRAY (garrow_large_list_array_get_type())
+G_DECLARE_DERIVABLE_TYPE(GArrowLargeListArray,
+                         garrow_large_list_array,
+                         GARROW,
+                         LARGE_LIST_ARRAY,
+                         GArrowArray)
+struct _GArrowLargeListArrayClass
+{
+  GArrowArrayClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_0_16
+GArrowLargeListArray *garrow_large_list_array_new(GArrowDataType *data_type,
+                                                  gint64 length,
+                                                  GArrowBuffer *value_offsets,
+                                                  GArrowArray *values,
+                                                  GArrowBuffer *null_bitmap,
+                                                  gint64 n_nulls);
+
+GARROW_AVAILABLE_IN_0_16
+GArrowDataType *garrow_large_list_array_get_value_type(GArrowLargeListArray *array);
+GARROW_AVAILABLE_IN_0_16
+GArrowArray *garrow_large_list_array_get_value(GArrowLargeListArray *array,
+                                               gint64 i);
+GARROW_AVAILABLE_IN_2_0
+GArrowArray *garrow_large_list_array_get_values(GArrowLargeListArray *array);
+GARROW_AVAILABLE_IN_2_0
+gint64 garrow_large_list_array_get_value_offset(GArrowLargeListArray *array,
+                                                gint64 i);
+GARROW_AVAILABLE_IN_2_0
+gint64 garrow_large_list_array_get_value_length(GArrowLargeListArray *array,
+                                                gint64 i);
+GARROW_AVAILABLE_IN_2_0
+const gint64 *
+garrow_large_list_array_get_value_offsets(GArrowLargeListArray *array,
+                                          gint64 *n_offsets);
 
 
 #define GARROW_TYPE_STRUCT_ARRAY (garrow_struct_array_get_type())
@@ -69,13 +119,35 @@ GArrowStructArray *garrow_struct_array_new(GArrowDataType *data_type,
 GArrowArray *garrow_struct_array_get_field(GArrowStructArray *array,
                                            gint i);
 
-#ifndef GARROW_DISABLE_DEPRECATED
-GARROW_DEPRECATED_IN_0_10_FOR(garrow_struct_array_flatten)
 GList *garrow_struct_array_get_fields(GArrowStructArray *array);
-#endif
 
 GARROW_AVAILABLE_IN_0_10
 GList *garrow_struct_array_flatten(GArrowStructArray *array, GError **error);
+
+
+#define GARROW_TYPE_MAP_ARRAY (garrow_map_array_get_type())
+G_DECLARE_DERIVABLE_TYPE(GArrowMapArray,
+                         garrow_map_array,
+                         GARROW,
+                         MAP_ARRAY,
+                         GArrowListArray)
+struct _GArrowMapArrayClass
+{
+  GArrowListArrayClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_0_17
+GArrowMapArray *
+garrow_map_array_new(GArrowArray *offsets,
+                     GArrowArray *keys,
+                     GArrowArray *items,
+                     GError **error);
+GARROW_AVAILABLE_IN_0_17
+GArrowArray *
+garrow_map_array_get_keys(GArrowMapArray *array);
+GARROW_AVAILABLE_IN_0_17
+GArrowArray *
+garrow_map_array_get_items(GArrowMapArray *array);
 
 
 #define GARROW_TYPE_UNION_ARRAY (garrow_union_array_get_type())
@@ -108,6 +180,11 @@ GArrowSparseUnionArray *
 garrow_sparse_union_array_new(GArrowInt8Array *type_ids,
                               GList *fields,
                               GError **error);
+GArrowSparseUnionArray *
+garrow_sparse_union_array_new_data_type(GArrowSparseUnionDataType *data_type,
+                                        GArrowInt8Array *type_ids,
+                                        GList *fields,
+                                        GError **error);
 
 
 #define GARROW_TYPE_DENSE_UNION_ARRAY (garrow_dense_union_array_get_type())
@@ -126,6 +203,12 @@ garrow_dense_union_array_new(GArrowInt8Array *type_ids,
                              GArrowInt32Array *value_offsets,
                              GList *fields,
                              GError **error);
+GArrowDenseUnionArray *
+garrow_dense_union_array_new_data_type(GArrowDenseUnionDataType *data_type,
+                                       GArrowInt8Array *type_ids,
+                                       GArrowInt32Array *value_offsets,
+                                       GList *fields,
+                                       GError **error);
 
 
 #define GARROW_TYPE_DICTIONARY_ARRAY (garrow_dictionary_array_get_type())
@@ -140,12 +223,18 @@ struct _GArrowDictionaryArrayClass
 };
 
 GArrowDictionaryArray *
-garrow_dictionary_array_new(GArrowDataType *data_type, GArrowArray *indices);
+garrow_dictionary_array_new(GArrowDataType *data_type,
+                            GArrowArray *indices,
+                            GArrowArray *dictionary,
+                            GError **error);
 GArrowArray *
 garrow_dictionary_array_get_indices(GArrowDictionaryArray *array);
 GArrowArray *
 garrow_dictionary_array_get_dictionary(GArrowDictionaryArray *array);
+#ifndef GARROW_DISABLE_DEPRECATED
+GARROW_DEPRECATED_IN_1_0_FOR(garrow_array_get_value_data_type)
 GArrowDictionaryDataType *
 garrow_dictionary_array_get_dictionary_data_type(GArrowDictionaryArray *array);
+#endif
 
 G_END_DECLS

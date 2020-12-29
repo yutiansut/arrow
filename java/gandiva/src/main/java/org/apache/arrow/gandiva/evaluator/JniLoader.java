@@ -35,6 +35,7 @@ class JniLoader {
 
   private static volatile JniLoader INSTANCE;
   private static volatile long defaultConfiguration = 0L;
+  private static volatile long unoptimizedConfiguration = 0L;
 
   private final JniWrapper wrapper;
 
@@ -119,12 +120,25 @@ class JniLoader {
     if (defaultConfiguration == 0L) {
       synchronized (ConfigurationBuilder.class) {
         if (defaultConfiguration == 0L) {
-          JniLoader.getInstance();  // setup
+          JniLoader.getInstance(); // setup
           defaultConfiguration = new ConfigurationBuilder()
             .buildConfigInstance();
         }
       }
     }
     return defaultConfiguration;
+  }
+
+  static long getUnoptimizedConfiguration() throws GandivaException {
+    if (unoptimizedConfiguration == 0L) {
+      synchronized (ConfigurationBuilder.class) {
+        if (unoptimizedConfiguration == 0L) {
+          JniLoader.getInstance(); // setup
+          unoptimizedConfiguration = new ConfigurationBuilder()
+              .buildConfigInstance(false);
+        }
+      }
+    }
+    return unoptimizedConfiguration;
   }
 }

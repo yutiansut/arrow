@@ -16,7 +16,7 @@
 // under the License.
 
 use rand::{
-    distributions::{range::SampleRange, Distribution, Standard},
+    distributions::{uniform::SampleUniform, Distribution, Standard},
     thread_rng, Rng,
 };
 
@@ -33,12 +33,6 @@ pub trait RandGen<T: DataType> {
             result.push(Self::gen(len))
         }
         result
-    }
-}
-
-impl<T: DataType> RandGen<T> for T {
-    default fn gen(_: i32) -> T::T {
-        panic!("Unsupported data type");
     }
 }
 
@@ -86,9 +80,9 @@ impl RandGen<ByteArrayType> for ByteArrayType {
         let mut rng = thread_rng();
         let mut result = ByteArray::new();
         let mut value = vec![];
-        let len = rng.gen_range::<usize>(0, 128);
+        let len = rng.gen_range(0..128);
         for _ in 0..len {
-            value.push(rng.gen_range(0, 255) & 0xFF);
+            value.push(rng.gen_range(0..255));
         }
         result.set_data(ByteBufferPtr::new(value));
         result
@@ -96,15 +90,15 @@ impl RandGen<ByteArrayType> for ByteArrayType {
 }
 
 impl RandGen<FixedLenByteArrayType> for FixedLenByteArrayType {
-    fn gen(len: i32) -> ByteArray {
+    fn gen(len: i32) -> FixedLenByteArray {
         let mut rng = thread_rng();
         let value_len = if len < 0 {
-            rng.gen_range::<usize>(0, 128)
+            rng.gen_range(0..128)
         } else {
             len as usize
         };
         let value = random_bytes(value_len);
-        ByteArray::from(value)
+        ByteArray::from(value).into()
     }
 }
 
@@ -112,7 +106,7 @@ pub fn random_bytes(n: usize) -> Vec<u8> {
     let mut result = vec![];
     let mut rng = thread_rng();
     for _ in 0..n {
-        result.push(rng.gen_range(0, 255) & 0xFF);
+        result.push(rng.gen_range(0..255));
     }
     result
 }
@@ -136,10 +130,10 @@ where
 
 pub fn random_numbers_range<T>(n: usize, low: T, high: T, result: &mut Vec<T>)
 where
-    T: PartialOrd + SampleRange + Copy,
+    T: PartialOrd + SampleUniform + Copy,
 {
     let mut rng = thread_rng();
     for _ in 0..n {
-        result.push(rng.gen_range(low, high));
+        result.push(rng.gen_range(low..high));
     }
 }

@@ -22,8 +22,11 @@ use criterion::Criterion;
 extern crate arrow;
 
 use arrow::array::*;
-use arrow::builder::*;
 use arrow::compute::*;
+use arrow::datatypes::ArrowNumericType;
+use arrow::util::test_util::seedable_rng;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 
 fn create_array(size: usize) -> Float32Array {
     let mut builder = Float32Builder::new(size);
@@ -37,123 +40,194 @@ fn create_array(size: usize) -> Float32Array {
     builder.finish()
 }
 
-pub fn eq_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(compare_op(&arr_a, &arr_b, |a, b| a == b).unwrap());
+fn create_string_array(size: usize, with_nulls: bool) -> StringArray {
+    // use random numbers to avoid spurious compiler optimizations wrt to branching
+    let mut rng = seedable_rng();
+    let mut builder = StringBuilder::new(size);
+
+    for _ in 0..size {
+        if with_nulls && rng.gen::<f32>() > 0.5 {
+            builder.append_null().unwrap();
+        } else {
+            let string = seedable_rng()
+                .sample_iter(&Alphanumeric)
+                .take(10)
+                .collect::<String>();
+            builder.append_value(&string).unwrap();
+        }
+    }
+    builder.finish()
 }
 
-pub fn neq_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(compare_op(&arr_a, &arr_b, |a, b| a != b).unwrap());
+fn bench_eq<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    eq(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
 }
 
-pub fn lt_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(
-        compare_op(&arr_a, &arr_b, |a, b| match (a, b) {
-            (None, None) => false,
-            (None, _) => true,
-            (_, None) => false,
-            (Some(aa), Some(bb)) => aa < bb,
-        })
-        .unwrap(),
-    );
+fn bench_eq_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    eq_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
 }
 
-fn lt_eq_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(
-        compare_op(&arr_a, &arr_b, |a, b| match (a, b) {
-            (None, None) => true,
-            (None, _) => true,
-            (_, None) => false,
-            (Some(aa), Some(bb)) => aa <= bb,
-        })
-        .unwrap(),
-    );
+fn bench_neq<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    neq(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
 }
 
-pub fn gt_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(
-        compare_op(&arr_a, &arr_b, |a, b| match (a, b) {
-            (None, None) => false,
-            (None, _) => false,
-            (_, None) => true,
-            (Some(aa), Some(bb)) => aa > bb,
-        })
-        .unwrap(),
-    );
+fn bench_neq_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    neq_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
 }
 
-fn gt_eq_no_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(
-        compare_op(&arr_a, &arr_b, |a, b| match (a, b) {
-            (None, None) => true,
-            (None, _) => false,
-            (_, None) => true,
-            (Some(aa), Some(bb)) => aa >= bb,
-        })
-        .unwrap(),
-    );
+fn bench_lt<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    lt(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
 }
 
-fn eq_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(eq(&arr_a, &arr_b).unwrap());
+fn bench_lt_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    lt_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
 }
 
-fn neq_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(neq(&arr_a, &arr_b).unwrap());
+fn bench_lt_eq<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    lt_eq(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
 }
 
-fn lt_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(lt(&arr_a, &arr_b).unwrap());
+fn bench_lt_eq_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    lt_eq_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
 }
 
-fn lt_eq_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(lt_eq(&arr_a, &arr_b).unwrap());
+fn bench_gt<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    gt(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
 }
 
-fn gt_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(gt(&arr_a, &arr_b).unwrap());
+fn bench_gt_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    gt_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
 }
 
-fn gt_eq_simd(size: usize) {
-    let arr_a = create_array(size);
-    let arr_b = create_array(size);
-    criterion::black_box(gt_eq(&arr_a, &arr_b).unwrap());
+fn bench_gt_eq<T>(arr_a: &PrimitiveArray<T>, arr_b: &PrimitiveArray<T>)
+where
+    T: ArrowNumericType,
+{
+    gt_eq(criterion::black_box(arr_a), criterion::black_box(arr_b)).unwrap();
+}
+
+fn bench_gt_eq_scalar<T>(arr_a: &PrimitiveArray<T>, value_b: T::Native)
+where
+    T: ArrowNumericType,
+{
+    gt_eq_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
+}
+
+fn bench_like_utf8_scalar(arr_a: &StringArray, value_b: &str) {
+    like_utf8_scalar(criterion::black_box(arr_a), criterion::black_box(value_b)).unwrap();
+}
+
+fn bench_nlike_utf8_scalar(arr_a: &StringArray, value_b: &str) {
+    nlike_utf8_scalar(criterion::black_box(arr_a), criterion::black_box(value_b))
+        .unwrap();
 }
 
 fn add_benchmark(c: &mut Criterion) {
-    c.bench_function("eq 512", |b| b.iter(|| eq_no_simd(512)));
-    c.bench_function("eq 512 simd", |b| b.iter(|| eq_simd(512)));
-    c.bench_function("neq 512", |b| b.iter(|| neq_no_simd(512)));
-    c.bench_function("neq 512 simd", |b| b.iter(|| neq_simd(512)));
-    c.bench_function("lt 512", |b| b.iter(|| lt_no_simd(512)));
-    c.bench_function("lt 512 simd", |b| b.iter(|| lt_simd(512)));
-    c.bench_function("lt_eq 512", |b| b.iter(|| lt_eq_no_simd(512)));
-    c.bench_function("lt_eq 512 simd", |b| b.iter(|| lt_eq_simd(512)));
-    c.bench_function("gt 512", |b| b.iter(|| gt_no_simd(512)));
-    c.bench_function("gt 512 simd", |b| b.iter(|| gt_simd(512)));
-    c.bench_function("gt_eq 512", |b| b.iter(|| gt_eq_no_simd(512)));
-    c.bench_function("gt_eq 512 simd", |b| b.iter(|| gt_eq_simd(512)));
+    let size = 65536;
+    let arr_a = create_array(size);
+    let arr_b = create_array(size);
+
+    let arr_string = create_string_array(size, false);
+
+    c.bench_function("eq Float32", |b| b.iter(|| bench_eq(&arr_a, &arr_b)));
+    c.bench_function("eq scalar Float32", |b| {
+        b.iter(|| bench_eq_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("neq Float32", |b| b.iter(|| bench_neq(&arr_a, &arr_b)));
+    c.bench_function("neq scalar Float32", |b| {
+        b.iter(|| bench_neq_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("lt Float32", |b| b.iter(|| bench_lt(&arr_a, &arr_b)));
+    c.bench_function("lt scalar Float32", |b| {
+        b.iter(|| bench_lt_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("lt_eq Float32", |b| b.iter(|| bench_lt_eq(&arr_a, &arr_b)));
+    c.bench_function("lt_eq scalar Float32", |b| {
+        b.iter(|| bench_lt_eq_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("gt Float32", |b| b.iter(|| bench_gt(&arr_a, &arr_b)));
+    c.bench_function("gt scalar Float32", |b| {
+        b.iter(|| bench_gt_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("gt_eq Float32", |b| b.iter(|| bench_gt_eq(&arr_a, &arr_b)));
+    c.bench_function("gt_eq scalar Float32", |b| {
+        b.iter(|| bench_gt_eq_scalar(&arr_a, 1.0))
+    });
+
+    c.bench_function("like_utf8 scalar equals", |b| {
+        b.iter(|| bench_like_utf8_scalar(&arr_string, "xxxx"))
+    });
+
+    c.bench_function("like_utf8 scalar contains", |b| {
+        b.iter(|| bench_like_utf8_scalar(&arr_string, "%xxxx%"))
+    });
+
+    c.bench_function("like_utf8 scalar ends with", |b| {
+        b.iter(|| bench_like_utf8_scalar(&arr_string, "xxxx%"))
+    });
+
+    c.bench_function("like_utf8 scalar starts with", |b| {
+        b.iter(|| bench_like_utf8_scalar(&arr_string, "%xxxx"))
+    });
+
+    c.bench_function("like_utf8 scalar complex", |b| {
+        b.iter(|| bench_like_utf8_scalar(&arr_string, "%xx_xx%xxx"))
+    });
+
+    c.bench_function("nlike_utf8 scalar equals", |b| {
+        b.iter(|| bench_nlike_utf8_scalar(&arr_string, "xxxx"))
+    });
+
+    c.bench_function("nlike_utf8 scalar contains", |b| {
+        b.iter(|| bench_nlike_utf8_scalar(&arr_string, "%xxxx%"))
+    });
+
+    c.bench_function("nlike_utf8 scalar ends with", |b| {
+        b.iter(|| bench_nlike_utf8_scalar(&arr_string, "xxxx%"))
+    });
+
+    c.bench_function("nlike_utf8 scalar starts with", |b| {
+        b.iter(|| bench_nlike_utf8_scalar(&arr_string, "%xxxx"))
+    });
+
+    c.bench_function("nlike_utf8 scalar complex", |b| {
+        b.iter(|| bench_nlike_utf8_scalar(&arr_string, "%xx_xx%xxx"))
+    });
 }
 
 criterion_group!(benches, add_benchmark);

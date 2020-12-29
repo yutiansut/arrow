@@ -21,7 +21,6 @@
 #include "gandiva/annotator.h"
 #include "gandiva/dex.h"
 #include "gandiva/function_registry.h"
-#include "gandiva/function_signature.h"
 #include "gandiva/gandiva_aliases.h"
 #include "gandiva/node.h"
 #include "gandiva/tree_expr_builder.h"
@@ -241,11 +240,6 @@ TEST_F(TestExprDecomposer, TestIfInCondition) {
   EXPECT_EQ(is_terminal_a, false);  // there was a nested if.
 
   EXPECT_EQ(decomposer.if_entries_stack_.empty(), true);
-}
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
 }
 
 }  // namespace gandiva

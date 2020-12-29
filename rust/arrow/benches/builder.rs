@@ -23,9 +23,10 @@ use std::mem::size_of;
 
 use criterion::*;
 use rand::distributions::Standard;
-use rand::{thread_rng, Rng};
 
-use arrow::builder::*;
+use arrow::array::*;
+use arrow::util::test_util::seedable_rng;
+use rand::Rng;
 
 // Build arrays with 512k elements.
 const BATCH_SIZE: usize = 8 << 10;
@@ -45,13 +46,13 @@ fn bench_primitive(c: &mut Criterion) {
             })
         })
         .throughput(Throughput::Bytes(
-            (data.len() * NUM_BATCHES * size_of::<i64>()) as u32,
+            ((data.len() * NUM_BATCHES * size_of::<i64>()) as u32).into(),
         )),
     );
 }
 
 fn bench_bool(c: &mut Criterion) {
-    let data: Vec<bool> = thread_rng()
+    let data: Vec<bool> = seedable_rng()
         .sample_iter(&Standard)
         .take(BATCH_SIZE)
         .collect();
@@ -68,7 +69,7 @@ fn bench_bool(c: &mut Criterion) {
             })
         })
         .throughput(Throughput::Bytes(
-            (data_len * NUM_BATCHES * size_of::<bool>()) as u32,
+            ((data_len * NUM_BATCHES * size_of::<bool>()) as u32).into(),
         )),
     );
 }

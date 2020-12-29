@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_UTIL_TRIE_H
-#define ARROW_UTIL_TRIE_H
+#pragma once
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <iosfwd>
 #include <limits>
 #include <string>
 #include <utility>
@@ -103,9 +103,7 @@ class SmallString {
   uint8_t length_;
   char data_[N];
 
-#ifndef NDEBUG
   void CheckSize(size_t n) { assert(n <= N); }
-#endif
 };
 
 template <uint8_t N>
@@ -241,5 +239,3 @@ class ARROW_EXPORT TrieBuilder {
 
 }  // namespace internal
 }  // namespace arrow
-
-#endif  // ARROW_UTIL_TRIE_H

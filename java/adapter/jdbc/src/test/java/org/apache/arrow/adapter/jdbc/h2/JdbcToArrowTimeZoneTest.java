@@ -37,7 +37,7 @@ import org.apache.arrow.adapter.jdbc.JdbcToArrowTestHelper;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.adapter.jdbc.Table;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.DateMilliVector;
+import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.TimeMilliVector;
 import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -104,7 +104,7 @@ public class JdbcToArrowTimeZoneTest extends AbstractJdbcToArrowTest {
    * Time and Timestamp datatype.
    */
   @Test
-  public void testJdbcToArroValues() throws SQLException, IOException {
+  public void testJdbcToArrowValues() throws SQLException, IOException {
     testDataSets(JdbcToArrow.sqlToArrow(conn, table.getQuery(), new RootAllocator(Integer.MAX_VALUE),
         Calendar.getInstance(TimeZone.getTimeZone(table.getTimezone()))));
     testDataSets(JdbcToArrow.sqlToArrow(conn.createStatement().executeQuery(table.getQuery()),
@@ -145,8 +145,8 @@ public class JdbcToArrowTimeZoneTest extends AbstractJdbcToArrowTest {
       case EST_DATE:
       case GMT_DATE:
       case PST_DATE:
-        assertDateVectorValues((DateMilliVector) root.getVector(table.getVector()), table.getValues().length,
-            table.getLongValues());
+        assertDateVectorValues((DateDayVector) root.getVector(table.getVector()), table.getValues().length,
+            table.getIntValues());
         break;
       case EST_TIME:
       case GMT_TIME:

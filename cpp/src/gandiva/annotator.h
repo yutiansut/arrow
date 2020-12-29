@@ -15,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef GANDIVA_EXPR_ANNOTATOR_H
-#define GANDIVA_EXPR_ANNOTATOR_H
+#pragma once
 
 #include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "arrow/util/logging.h"
 #include "gandiva/arrow.h"
 #include "gandiva/eval_batch.h"
 #include "gandiva/gandiva_aliases.h"
-#include "gandiva/logging.h"
 #include "gandiva/visibility.h"
 
 namespace gandiva {
@@ -52,14 +51,17 @@ class GANDIVA_EXPORT Annotator {
   EvalBatchPtr PrepareEvalBatch(const arrow::RecordBatch& record_batch,
                                 const ArrayDataVector& out_vector);
 
+  int buffer_count() { return buffer_count_; }
+
  private:
   /// Annotate a field and return the descriptor.
-  FieldDescriptorPtr MakeDesc(FieldPtr field);
+  FieldDescriptorPtr MakeDesc(FieldPtr field, bool is_output);
 
   /// Populate eval_batch by extracting the raw buffers from the arrow array, whose
   /// contents are represent by the annotated descriptor 'desc'.
   void PrepareBuffersForField(const FieldDescriptor& desc,
-                              const arrow::ArrayData& array_data, EvalBatch* eval_batch);
+                              const arrow::ArrayData& array_data, EvalBatch* eval_batch,
+                              bool is_output);
 
   /// The list of input/output buffers (includes bitmap buffers, value buffers and
   /// offset buffers).
@@ -77,5 +79,3 @@ class GANDIVA_EXPORT Annotator {
 };
 
 }  // namespace gandiva
-
-#endif  // GANDIVA_EXPR_ANNOTATOR_H

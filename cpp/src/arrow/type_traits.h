@@ -15,18 +15,70 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_TYPE_TRAITS_H
-#define ARROW_TYPE_TRAITS_H
+#pragma once
 
 #include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>
 
-#include "arrow/type_fwd.h"
-#include "arrow/util/bit-util.h"
+#include "arrow/type.h"
+#include "arrow/util/bit_util.h"
 
 namespace arrow {
+
+//
+// Per-type id type lookup
+//
+
+template <Type::type id>
+struct TypeIdTraits {};
+
+#define TYPE_ID_TRAIT(_id, _typeclass) \
+  template <>                          \
+  struct TypeIdTraits<Type::_id> {     \
+    using Type = _typeclass;           \
+  };
+
+TYPE_ID_TRAIT(NA, NullType)
+TYPE_ID_TRAIT(BOOL, BooleanType)
+TYPE_ID_TRAIT(INT8, Int8Type)
+TYPE_ID_TRAIT(INT16, Int16Type)
+TYPE_ID_TRAIT(INT32, Int32Type)
+TYPE_ID_TRAIT(INT64, Int64Type)
+TYPE_ID_TRAIT(UINT8, UInt8Type)
+TYPE_ID_TRAIT(UINT16, UInt16Type)
+TYPE_ID_TRAIT(UINT32, UInt32Type)
+TYPE_ID_TRAIT(UINT64, UInt64Type)
+TYPE_ID_TRAIT(HALF_FLOAT, HalfFloatType)
+TYPE_ID_TRAIT(FLOAT, FloatType)
+TYPE_ID_TRAIT(DOUBLE, DoubleType)
+TYPE_ID_TRAIT(STRING, StringType)
+TYPE_ID_TRAIT(BINARY, BinaryType)
+TYPE_ID_TRAIT(LARGE_STRING, LargeStringType)
+TYPE_ID_TRAIT(LARGE_BINARY, LargeBinaryType)
+TYPE_ID_TRAIT(FIXED_SIZE_BINARY, FixedSizeBinaryType)
+TYPE_ID_TRAIT(DATE32, Date32Type)
+TYPE_ID_TRAIT(DATE64, Date64Type)
+TYPE_ID_TRAIT(TIME32, Time32Type)
+TYPE_ID_TRAIT(TIME64, Time64Type)
+TYPE_ID_TRAIT(TIMESTAMP, TimestampType)
+TYPE_ID_TRAIT(INTERVAL_DAY_TIME, DayTimeIntervalType)
+TYPE_ID_TRAIT(INTERVAL_MONTHS, MonthIntervalType)
+TYPE_ID_TRAIT(DURATION, DurationType)
+TYPE_ID_TRAIT(DECIMAL128, Decimal128Type)
+TYPE_ID_TRAIT(DECIMAL256, Decimal256Type)
+TYPE_ID_TRAIT(STRUCT, StructType)
+TYPE_ID_TRAIT(LIST, ListType)
+TYPE_ID_TRAIT(LARGE_LIST, LargeListType)
+TYPE_ID_TRAIT(FIXED_SIZE_LIST, FixedSizeListType)
+TYPE_ID_TRAIT(MAP, MapType)
+TYPE_ID_TRAIT(DENSE_UNION, DenseUnionType)
+TYPE_ID_TRAIT(SPARSE_UNION, SparseUnionType)
+TYPE_ID_TRAIT(DICTIONARY, DictionaryType)
+TYPE_ID_TRAIT(EXTENSION, ExtensionType)
+
+#undef TYPE_ID_TRAIT
 
 //
 // Per-type type traits
@@ -151,6 +203,45 @@ struct TypeTraits<TimestampType> {
 };
 
 template <>
+struct TypeTraits<DurationType> {
+  using ArrayType = DurationArray;
+  using BuilderType = DurationBuilder;
+  using ScalarType = DurationScalar;
+  using CType = DurationType::c_type;
+
+  static constexpr int64_t bytes_required(int64_t elements) {
+    return elements * static_cast<int64_t>(sizeof(int64_t));
+  }
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<DayTimeIntervalType> {
+  using ArrayType = DayTimeIntervalArray;
+  using BuilderType = DayTimeIntervalBuilder;
+  using ScalarType = DayTimeIntervalScalar;
+
+  static constexpr int64_t bytes_required(int64_t elements) {
+    return elements * static_cast<int64_t>(sizeof(DayTimeIntervalType::DayMilliseconds));
+  }
+  constexpr static bool is_parameter_free = true;
+  static std::shared_ptr<DataType> type_singleton() { return day_time_interval(); }
+};
+
+template <>
+struct TypeTraits<MonthIntervalType> {
+  using ArrayType = MonthIntervalArray;
+  using BuilderType = MonthIntervalBuilder;
+  using ScalarType = MonthIntervalScalar;
+
+  static constexpr int64_t bytes_required(int64_t elements) {
+    return elements * static_cast<int64_t>(sizeof(int32_t));
+  }
+  constexpr static bool is_parameter_free = true;
+  static std::shared_ptr<DataType> type_singleton() { return month_interval(); }
+};
+
+template <>
 struct TypeTraits<Time32Type> {
   using ArrayType = Time32Array;
   using BuilderType = Time32Builder;
@@ -199,12 +290,31 @@ struct TypeTraits<Decimal128Type> {
 };
 
 template <>
+struct TypeTraits<Decimal256Type> {
+  using ArrayType = Decimal256Array;
+  using BuilderType = Decimal256Builder;
+  using ScalarType = Decimal256Scalar;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
 struct TypeTraits<BinaryType> {
   using ArrayType = BinaryArray;
   using BuilderType = BinaryBuilder;
   using ScalarType = BinaryScalar;
+  using OffsetType = Int32Type;
   constexpr static bool is_parameter_free = true;
   static inline std::shared_ptr<DataType> type_singleton() { return binary(); }
+};
+
+template <>
+struct TypeTraits<LargeBinaryType> {
+  using ArrayType = LargeBinaryArray;
+  using BuilderType = LargeBinaryBuilder;
+  using ScalarType = LargeBinaryScalar;
+  using OffsetType = Int64Type;
+  constexpr static bool is_parameter_free = true;
+  static inline std::shared_ptr<DataType> type_singleton() { return large_binary(); }
 };
 
 template <>
@@ -220,8 +330,19 @@ struct TypeTraits<StringType> {
   using ArrayType = StringArray;
   using BuilderType = StringBuilder;
   using ScalarType = StringScalar;
+  using OffsetType = Int32Type;
   constexpr static bool is_parameter_free = true;
   static inline std::shared_ptr<DataType> type_singleton() { return utf8(); }
+};
+
+template <>
+struct TypeTraits<LargeStringType> {
+  using ArrayType = LargeStringArray;
+  using BuilderType = LargeStringBuilder;
+  using ScalarType = LargeStringScalar;
+  using OffsetType = Int64Type;
+  constexpr static bool is_parameter_free = true;
+  static inline std::shared_ptr<DataType> type_singleton() { return large_utf8(); }
 };
 
 template <>
@@ -230,8 +351,15 @@ struct CTypeTraits<std::string> : public TypeTraits<StringType> {
 };
 
 template <>
-struct CTypeTraits<char*> : public TypeTraits<StringType> {
-  using ArrowType = StringType;
+struct CTypeTraits<const char*> : public CTypeTraits<std::string> {};
+
+template <size_t N>
+struct CTypeTraits<const char (&)[N]> : public CTypeTraits<std::string> {};
+
+template <>
+struct CTypeTraits<DayTimeIntervalType::DayMilliseconds>
+    : public TypeTraits<DayTimeIntervalType> {
+  using ArrowType = DayTimeIntervalType;
 };
 
 template <>
@@ -239,6 +367,41 @@ struct TypeTraits<ListType> {
   using ArrayType = ListArray;
   using BuilderType = ListBuilder;
   using ScalarType = ListScalar;
+  using OffsetType = Int32Type;
+  using OffsetArrayType = Int32Array;
+  using OffsetBuilderType = Int32Builder;
+  using OffsetScalarType = Int32Scalar;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<LargeListType> {
+  using ArrayType = LargeListArray;
+  using BuilderType = LargeListBuilder;
+  using ScalarType = LargeListScalar;
+  using OffsetType = Int64Type;
+  using OffsetArrayType = Int64Array;
+  using OffsetBuilderType = Int64Builder;
+  using OffsetScalarType = Int64Scalar;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<MapType> {
+  using ArrayType = MapArray;
+  using BuilderType = MapBuilder;
+  using ScalarType = MapScalar;
+  using OffsetType = Int32Type;
+  using OffsetArrayType = Int32Array;
+  using OffsetBuilderType = Int32Builder;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<FixedSizeListType> {
+  using ArrayType = FixedSizeListArray;
+  using BuilderType = FixedSizeListBuilder;
+  using ScalarType = FixedSizeListScalar;
   constexpr static bool is_parameter_free = false;
 };
 
@@ -260,188 +423,372 @@ struct TypeTraits<StructType> {
 };
 
 template <>
-struct TypeTraits<UnionType> {
-  using ArrayType = UnionArray;
+struct TypeTraits<SparseUnionType> {
+  using ArrayType = SparseUnionArray;
+  using BuilderType = SparseUnionBuilder;
+  using ScalarType = SparseUnionScalar;
+  constexpr static bool is_parameter_free = false;
+};
+
+template <>
+struct TypeTraits<DenseUnionType> {
+  using ArrayType = DenseUnionArray;
+  using BuilderType = DenseUnionBuilder;
+  using ScalarType = DenseUnionScalar;
   constexpr static bool is_parameter_free = false;
 };
 
 template <>
 struct TypeTraits<DictionaryType> {
   using ArrayType = DictionaryArray;
-  // TODO(wesm): Not sure what to do about this
-  // using ScalarType = DictionaryScalar;
+  using ScalarType = DictionaryScalar;
   constexpr static bool is_parameter_free = false;
 };
 
 template <>
 struct TypeTraits<ExtensionType> {
   using ArrayType = ExtensionArray;
+  using ScalarType = ExtensionScalar;
   constexpr static bool is_parameter_free = false;
 };
+
+namespace internal {
+
+template <typename... Ts>
+struct make_void {
+  using type = void;
+};
+
+template <typename... Ts>
+using void_t = typename make_void<Ts...>::type;
+
+}  // namespace internal
 
 //
 // Useful type predicates
 //
 
-template <typename T>
-using is_number = std::is_base_of<Number, T>;
+// only in C++14
+template <bool B, typename T = void>
+using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T>
-struct has_c_type {
-  static constexpr bool value =
-      (std::is_base_of<PrimitiveCType, T>::value || std::is_base_of<DateType, T>::value ||
-       std::is_base_of<TimeType, T>::value || std::is_base_of<TimestampType, T>::value);
-};
-
-template <typename T>
-struct is_8bit_int {
-  static constexpr bool value =
-      (std::is_same<UInt8Type, T>::value || std::is_same<Int8Type, T>::value);
-};
+using is_null_type = std::is_same<NullType, T>;
 
 template <typename T, typename R = void>
-using enable_if_8bit_int = typename std::enable_if<is_8bit_int<T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_primitive_ctype =
-    typename std::enable_if<std::is_base_of<PrimitiveCType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_integer =
-    typename std::enable_if<std::is_base_of<Integer, T>::value, R>::type;
+using enable_if_null = enable_if_t<is_null_type<T>::value, R>;
 
 template <typename T>
-using is_signed_integer =
-    std::integral_constant<bool, std::is_base_of<Integer, T>::value &&
+using is_boolean_type = std::is_same<BooleanType, T>;
+
+template <typename T, typename R = void>
+using enable_if_boolean = enable_if_t<is_boolean_type<T>::value, R>;
+
+template <typename T>
+using is_number_type = std::is_base_of<NumberType, T>;
+
+template <typename T, typename R = void>
+using enable_if_number = enable_if_t<is_number_type<T>::value, R>;
+
+template <typename T>
+using is_integer_type = std::is_base_of<IntegerType, T>;
+
+template <typename T, typename R = void>
+using enable_if_integer = enable_if_t<is_integer_type<T>::value, R>;
+
+template <typename T>
+using is_signed_integer_type =
+    std::integral_constant<bool, is_integer_type<T>::value &&
                                      std::is_signed<typename T::c_type>::value>;
 
 template <typename T, typename R = void>
-using enable_if_signed_integer =
-    typename std::enable_if<is_signed_integer<T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_unsigned_integer =
-    typename std::enable_if<std::is_base_of<Integer, T>::value &&
-                                std::is_unsigned<typename T::c_type>::value,
-                            R>::type;
-
-template <typename T, typename R = void>
-using enable_if_floating_point =
-    typename std::enable_if<std::is_base_of<FloatingPoint, T>::value, R>::type;
+using enable_if_signed_integer = enable_if_t<is_signed_integer_type<T>::value, R>;
 
 template <typename T>
-using is_date = std::is_base_of<DateType, T>;
+using is_unsigned_integer_type =
+    std::integral_constant<bool, is_integer_type<T>::value &&
+                                     std::is_unsigned<typename T::c_type>::value>;
 
 template <typename T, typename R = void>
-using enable_if_date = typename std::enable_if<is_date<T>::value, R>::type;
+using enable_if_unsigned_integer = enable_if_t<is_unsigned_integer_type<T>::value, R>;
+
+// Note this will also include HalfFloatType which is represented by a
+// non-floating point primitive (uint16_t).
+template <typename T>
+using is_floating_type = std::is_base_of<FloatingPointType, T>;
+
+template <typename T, typename R = void>
+using enable_if_floating_point = enable_if_t<is_floating_type<T>::value, R>;
+
+// Half floats are special in that they behave physically like an unsigned
+// integer.
+template <typename T>
+using is_half_float_type = std::is_same<HalfFloatType, T>;
+
+template <typename T, typename R = void>
+using enable_if_half_float = enable_if_t<is_half_float_type<T>::value, R>;
+
+// Binary Types
+
+// Base binary refers to Binary/LargeBinary/String/LargeString
+template <typename T>
+using is_base_binary_type = std::is_base_of<BaseBinaryType, T>;
+
+template <typename T, typename R = void>
+using enable_if_base_binary = enable_if_t<is_base_binary_type<T>::value, R>;
+
+// Any binary excludes string from Base binary
+template <typename T>
+using is_binary_type =
+    std::integral_constant<bool, std::is_same<BinaryType, T>::value ||
+                                     std::is_same<LargeBinaryType, T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_binary = enable_if_t<is_binary_type<T>::value, R>;
 
 template <typename T>
-using is_time = std::is_base_of<TimeType, T>;
+using is_string_type =
+    std::integral_constant<bool, std::is_same<StringType, T>::value ||
+                                     std::is_same<LargeStringType, T>::value>;
 
 template <typename T, typename R = void>
-using enable_if_time = typename std::enable_if<is_time<T>::value, R>::type;
+using enable_if_string = enable_if_t<is_string_type<T>::value, R>;
 
 template <typename T>
-using is_timestamp = std::is_base_of<TimestampType, T>;
+using is_string_like_type =
+    std::integral_constant<bool, is_base_binary_type<T>::value && T::is_utf8>;
 
 template <typename T, typename R = void>
-using enable_if_timestamp = typename std::enable_if<is_timestamp<T>::value, R>::type;
+using enable_if_string_like = enable_if_t<is_string_like_type<T>::value, R>;
 
-template <typename T, typename R = void>
-using enable_if_has_c_type = typename std::enable_if<has_c_type<T>::value, R>::type;
+template <typename T, typename U, typename R = void>
+using enable_if_same = enable_if_t<std::is_same<T, U>::value, R>;
 
-template <typename T, typename R = void>
-using enable_if_null = typename std::enable_if<std::is_same<NullType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_binary =
-    typename std::enable_if<std::is_base_of<BinaryType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_boolean =
-    typename std::enable_if<std::is_same<BooleanType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_binary_like =
-    typename std::enable_if<std::is_base_of<BinaryType, T>::value ||
-                                std::is_base_of<FixedSizeBinaryType, T>::value,
-                            R>::type;
-
-template <typename T, typename R = void>
-using enable_if_fixed_size_binary =
-    typename std::enable_if<std::is_base_of<FixedSizeBinaryType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_list =
-    typename std::enable_if<std::is_base_of<ListType, T>::value, R>::type;
-
-template <typename T, typename R = void>
-using enable_if_number = typename std::enable_if<is_number<T>::value, R>::type;
-
-namespace detail {
-
-// Not all type classes have a c_type
+// Note that this also includes DecimalType
 template <typename T>
-struct as_void {
-  using type = void;
-};
+using is_fixed_size_binary_type = std::is_base_of<FixedSizeBinaryType, T>;
 
-// The partial specialization will match if T has the ATTR_NAME member
-#define GET_ATTR(ATTR_NAME, DEFAULT)                                             \
-  template <typename T, typename Enable = void>                                  \
-  struct GetAttr_##ATTR_NAME {                                                   \
-    using type = DEFAULT;                                                        \
-  };                                                                             \
-                                                                                 \
-  template <typename T>                                                          \
-  struct GetAttr_##ATTR_NAME<T, typename as_void<typename T::ATTR_NAME>::type> { \
-    using type = typename T::ATTR_NAME;                                          \
-  };
-
-GET_ATTR(c_type, void)
-GET_ATTR(TypeClass, void)
-
-#undef GET_ATTR
-
-}  // namespace detail
-
-#define PRIMITIVE_TRAITS(T)                                                         \
-  using TypeClass =                                                                 \
-      typename std::conditional<std::is_base_of<DataType, T>::value, T,             \
-                                typename detail::GetAttr_TypeClass<T>::type>::type; \
-  using c_type = typename detail::GetAttr_c_type<TypeClass>::type
+template <typename T, typename R = void>
+using enable_if_fixed_size_binary = enable_if_t<is_fixed_size_binary_type<T>::value, R>;
 
 template <typename T>
-struct IsUnsignedInt {
-  PRIMITIVE_TRAITS(T);
-  static constexpr bool value =
-      std::is_integral<c_type>::value && std::is_unsigned<c_type>::value;
-};
+using is_binary_like_type =
+    std::integral_constant<bool, (is_base_binary_type<T>::value &&
+                                  !is_string_like_type<T>::value) ||
+                                     is_fixed_size_binary_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_binary_like = enable_if_t<is_binary_like_type<T>::value, R>;
 
 template <typename T>
-struct IsSignedInt {
-  PRIMITIVE_TRAITS(T);
-  static constexpr bool value =
-      std::is_integral<c_type>::value && std::is_signed<c_type>::value;
-};
+using is_decimal_type = std::is_base_of<DecimalType, T>;
+
+template <typename T, typename R = void>
+using enable_if_decimal = enable_if_t<is_decimal_type<T>::value, R>;
 
 template <typename T>
-struct IsInteger {
-  PRIMITIVE_TRAITS(T);
-  static constexpr bool value = std::is_integral<c_type>::value;
-};
+using is_decimal128_type = std::is_base_of<Decimal128Type, T>;
+
+template <typename T, typename R = void>
+using enable_if_decimal128 = enable_if_t<is_decimal128_type<T>::value, R>;
 
 template <typename T>
-struct IsFloatingPoint {
-  PRIMITIVE_TRAITS(T);
-  static constexpr bool value = std::is_floating_point<c_type>::value;
-};
+using is_decimal256_type = std::is_base_of<Decimal256Type, T>;
+
+template <typename T, typename R = void>
+using enable_if_decimal256 = enable_if_t<is_decimal256_type<T>::value, R>;
+
+// Nested Types
 
 template <typename T>
-struct IsNumeric {
-  PRIMITIVE_TRAITS(T);
-  static constexpr bool value = std::is_arithmetic<c_type>::value;
-};
+using is_nested_type = std::is_base_of<NestedType, T>;
+
+template <typename T, typename R = void>
+using enable_if_nested = enable_if_t<is_nested_type<T>::value, R>;
+
+template <typename T, typename R = void>
+using enable_if_not_nested = enable_if_t<!is_nested_type<T>::value, R>;
+
+template <typename T>
+using is_var_length_list_type =
+    std::integral_constant<bool, std::is_base_of<LargeListType, T>::value ||
+                                     std::is_base_of<ListType, T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_var_size_list = enable_if_t<is_var_length_list_type<T>::value, R>;
+
+// DEPRECATED use is_var_length_list_type.
+template <typename T>
+using is_base_list_type = is_var_length_list_type<T>;
+
+// DEPRECATED use enable_if_var_size_list
+template <typename T, typename R = void>
+using enable_if_base_list = enable_if_var_size_list<T, R>;
+
+template <typename T>
+using is_fixed_size_list_type = std::is_same<FixedSizeListType, T>;
+
+template <typename T, typename R = void>
+using enable_if_fixed_size_list = enable_if_t<is_fixed_size_list_type<T>::value, R>;
+
+template <typename T>
+using is_list_type =
+    std::integral_constant<bool, std::is_same<T, ListType>::value ||
+                                     std::is_same<T, LargeListType>::value ||
+                                     std::is_same<T, FixedSizeListType>::value>;
+
+template <typename T, typename R = void>
+using enable_if_list_type = enable_if_t<is_list_type<T>::value, R>;
+
+template <typename T>
+using is_list_like_type =
+    std::integral_constant<bool, is_base_list_type<T>::value ||
+                                     is_fixed_size_list_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_list_like = enable_if_t<is_list_like_type<T>::value, R>;
+
+template <typename T>
+using is_struct_type = std::is_base_of<StructType, T>;
+
+template <typename T, typename R = void>
+using enable_if_struct = enable_if_t<is_struct_type<T>::value, R>;
+
+template <typename T>
+using is_union_type = std::is_base_of<UnionType, T>;
+
+template <typename T, typename R = void>
+using enable_if_union = enable_if_t<is_union_type<T>::value, R>;
+
+// TemporalTypes
+
+template <typename T>
+using is_temporal_type = std::is_base_of<TemporalType, T>;
+
+template <typename T, typename R = void>
+using enable_if_temporal = enable_if_t<is_temporal_type<T>::value, R>;
+
+template <typename T>
+using is_date_type = std::is_base_of<DateType, T>;
+
+template <typename T, typename R = void>
+using enable_if_date = enable_if_t<is_date_type<T>::value, R>;
+
+template <typename T>
+using is_time_type = std::is_base_of<TimeType, T>;
+
+template <typename T, typename R = void>
+using enable_if_time = enable_if_t<is_time_type<T>::value, R>;
+
+template <typename T>
+using is_timestamp_type = std::is_base_of<TimestampType, T>;
+
+template <typename T, typename R = void>
+using enable_if_timestamp = enable_if_t<is_timestamp_type<T>::value, R>;
+
+template <typename T>
+using is_duration_type = std::is_base_of<DurationType, T>;
+
+template <typename T, typename R = void>
+using enable_if_duration = enable_if_t<is_duration_type<T>::value, R>;
+
+template <typename T>
+using is_interval_type = std::is_base_of<IntervalType, T>;
+
+template <typename T, typename R = void>
+using enable_if_interval = enable_if_t<is_interval_type<T>::value, R>;
+
+template <typename T>
+using is_dictionary_type = std::is_base_of<DictionaryType, T>;
+
+template <typename T, typename R = void>
+using enable_if_dictionary = enable_if_t<is_dictionary_type<T>::value, R>;
+
+template <typename T>
+using is_extension_type = std::is_base_of<ExtensionType, T>;
+
+template <typename T, typename R = void>
+using enable_if_extension = enable_if_t<is_extension_type<T>::value, R>;
+
+// Attribute differentiation
+
+template <typename T>
+using is_primitive_ctype = std::is_base_of<PrimitiveCType, T>;
+
+template <typename T, typename R = void>
+using enable_if_primitive_ctype = enable_if_t<is_primitive_ctype<T>::value, R>;
+
+template <typename T>
+using has_c_type = std::integral_constant<bool, is_primitive_ctype<T>::value ||
+                                                    is_temporal_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_has_c_type = enable_if_t<has_c_type<T>::value, R>;
+
+template <typename T>
+using has_string_view =
+    std::integral_constant<bool, std::is_same<BinaryType, T>::value ||
+                                     std::is_same<LargeBinaryType, T>::value ||
+                                     std::is_same<StringType, T>::value ||
+                                     std::is_same<LargeStringType, T>::value ||
+                                     std::is_same<FixedSizeBinaryType, T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_has_string_view = enable_if_t<has_string_view<T>::value, R>;
+
+template <typename T>
+using is_8bit_int = std::integral_constant<bool, std::is_same<UInt8Type, T>::value ||
+                                                     std::is_same<Int8Type, T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_8bit_int = enable_if_t<is_8bit_int<T>::value, R>;
+
+template <typename T>
+using is_parameter_free_type =
+    std::integral_constant<bool, TypeTraits<T>::is_parameter_free>;
+
+template <typename T, typename R = void>
+using enable_if_parameter_free = enable_if_t<is_parameter_free_type<T>::value, R>;
+
+// Physical representation quirks
+
+template <typename T>
+using is_physical_signed_integer_type =
+    std::integral_constant<bool,
+                           is_signed_integer_type<T>::value ||
+                               (is_temporal_type<T>::value && has_c_type<T>::value)>;
+
+template <typename T, typename R = void>
+using enable_if_physical_signed_integer =
+    enable_if_t<is_physical_signed_integer_type<T>::value, R>;
+
+template <typename T>
+using is_physical_unsigned_integer_type =
+    std::integral_constant<bool, is_unsigned_integer_type<T>::value ||
+                                     is_half_float_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_physical_unsigned_integer =
+    enable_if_t<is_physical_unsigned_integer_type<T>::value, R>;
+
+template <typename T>
+using is_physical_integer_type =
+    std::integral_constant<bool, is_physical_unsigned_integer_type<T>::value ||
+                                     is_physical_signed_integer_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_physical_integer = enable_if_t<is_physical_integer_type<T>::value, R>;
+
+// Like is_floating_type but excluding half-floats which don't have a
+// float-like c type.
+template <typename T>
+using is_physical_floating_type =
+    std::integral_constant<bool,
+                           is_floating_type<T>::value && !is_half_float_type<T>::value>;
+
+template <typename T, typename R = void>
+using enable_if_physical_floating_point =
+    enable_if_t<is_physical_floating_type<T>::value, R>;
 
 static inline bool is_integer(Type::type type_id) {
   switch (type_id) {
@@ -453,6 +800,32 @@ static inline bool is_integer(Type::type type_id) {
     case Type::INT32:
     case Type::UINT64:
     case Type::INT64:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
+static inline bool is_signed_integer(Type::type type_id) {
+  switch (type_id) {
+    case Type::INT8:
+    case Type::INT16:
+    case Type::INT32:
+    case Type::INT64:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
+static inline bool is_unsigned_integer(Type::type type_id) {
+  switch (type_id) {
+    case Type::UINT8:
+    case Type::UINT16:
+    case Type::UINT32:
+    case Type::UINT64:
       return true;
     default:
       break;
@@ -474,7 +847,6 @@ static inline bool is_floating(Type::type type_id) {
 
 static inline bool is_primitive(Type::type type_id) {
   switch (type_id) {
-    case Type::NA:
     case Type::BOOL:
     case Type::UINT8:
     case Type::INT8:
@@ -492,7 +864,22 @@ static inline bool is_primitive(Type::type type_id) {
     case Type::TIME32:
     case Type::TIME64:
     case Type::TIMESTAMP:
-    case Type::INTERVAL:
+    case Type::DURATION:
+    case Type::INTERVAL_MONTHS:
+    case Type::INTERVAL_DAY_TIME:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
+static inline bool is_base_binary_like(Type::type type_id) {
+  switch (type_id) {
+    case Type::BINARY:
+    case Type::LARGE_BINARY:
+    case Type::STRING:
+    case Type::LARGE_STRING:
       return true;
     default:
       break;
@@ -511,13 +898,25 @@ static inline bool is_binary_like(Type::type type_id) {
   return false;
 }
 
+static inline bool is_large_binary_like(Type::type type_id) {
+  switch (type_id) {
+    case Type::LARGE_BINARY:
+    case Type::LARGE_STRING:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
 static inline bool is_dictionary(Type::type type_id) {
   return type_id == Type::DICTIONARY;
 }
 
 static inline bool is_fixed_size_binary(Type::type type_id) {
   switch (type_id) {
-    case Type::DECIMAL:
+    case Type::DECIMAL128:
+    case Type::DECIMAL256:
     case Type::FIXED_SIZE_BINARY:
       return true;
     default:
@@ -530,6 +929,20 @@ static inline bool is_fixed_width(Type::type type_id) {
   return is_primitive(type_id) || is_dictionary(type_id) || is_fixed_size_binary(type_id);
 }
 
-}  // namespace arrow
+static inline bool is_nested(Type::type type_id) {
+  switch (type_id) {
+    case Type::LIST:
+    case Type::LARGE_LIST:
+    case Type::FIXED_SIZE_LIST:
+    case Type::MAP:
+    case Type::STRUCT:
+    case Type::SPARSE_UNION:
+    case Type::DENSE_UNION:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
 
-#endif  // ARROW_TYPE_TRAITS_H
+}  // namespace arrow

@@ -17,12 +17,5 @@
 
 //! DataFusion query execution
 
-pub mod aggregate;
 pub mod context;
-pub mod expression;
-pub mod filter;
-pub mod limit;
-pub mod projection;
-pub mod relation;
-pub mod scalar_relation;
-pub mod table_impl;
+pub mod dataframe_impl;

@@ -19,12 +19,12 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
 #include "arrow/testing/gtest_util.h"
 #include "gandiva/arrow.h"
 #include "gandiva/configuration.h"
 
-#ifndef GANDIVA_TEST_UTIL_H
-#define GANDIVA_TEST_UTIL_H
+#pragma once
 
 namespace gandiva {
 
@@ -34,31 +34,33 @@ namespace gandiva {
 // arrow/testing/gtest_util.h has good utility classes for this purpose.
 // Using those
 template <typename TYPE, typename C_TYPE>
-static ArrayPtr MakeArrowArray(std::vector<C_TYPE> values, std::vector<bool> validity) {
+static inline ArrayPtr MakeArrowArray(std::vector<C_TYPE> values,
+                                      std::vector<bool> validity) {
   ArrayPtr out;
   arrow::ArrayFromVector<TYPE, C_TYPE>(validity, values, &out);
   return out;
 }
 
 template <typename TYPE, typename C_TYPE>
-static ArrayPtr MakeArrowArray(std::vector<C_TYPE> values) {
+static inline ArrayPtr MakeArrowArray(std::vector<C_TYPE> values) {
   ArrayPtr out;
   arrow::ArrayFromVector<TYPE, C_TYPE>(values, &out);
   return out;
 }
 
 template <typename TYPE, typename C_TYPE>
-static ArrayPtr MakeArrowArray(const std::shared_ptr<arrow::DataType>& type,
-                               std::vector<C_TYPE> values, std::vector<bool> validity) {
+static inline ArrayPtr MakeArrowArray(const std::shared_ptr<arrow::DataType>& type,
+                                      std::vector<C_TYPE> values,
+                                      std::vector<bool> validity) {
   ArrayPtr out;
   arrow::ArrayFromVector<TYPE, C_TYPE>(type, validity, values, &out);
   return out;
 }
 
 template <typename TYPE, typename C_TYPE>
-static ArrayPtr MakeArrowTypeArray(const std::shared_ptr<arrow::DataType>& type,
-                                   const std::vector<C_TYPE>& values,
-                                   const std::vector<bool>& validity) {
+static inline ArrayPtr MakeArrowTypeArray(const std::shared_ptr<arrow::DataType>& type,
+                                          const std::vector<C_TYPE>& values,
+                                          const std::vector<bool>& validity) {
   ArrayPtr out;
   arrow::ArrayFromVector<TYPE, C_TYPE>(type, validity, values, &out);
   return out;
@@ -75,6 +77,7 @@ static ArrayPtr MakeArrowTypeArray(const std::shared_ptr<arrow::DataType>& type,
 #define MakeArrowArrayUint64 MakeArrowArray<arrow::UInt64Type, uint64_t>
 #define MakeArrowArrayFloat32 MakeArrowArray<arrow::FloatType, float>
 #define MakeArrowArrayFloat64 MakeArrowArray<arrow::DoubleType, double>
+#define MakeArrowArrayDate64 MakeArrowArray<arrow::Date64Type, int64_t>
 #define MakeArrowArrayUtf8 MakeArrowArray<arrow::StringType, std::string>
 #define MakeArrowArrayBinary MakeArrowArray<arrow::BinaryType, std::string>
 #define MakeArrowArrayDecimal MakeArrowArray<arrow::Decimal128Type, arrow::Decimal128>
@@ -92,11 +95,9 @@ static ArrayPtr MakeArrowTypeArray(const std::shared_ptr<arrow::DataType>& type,
   EXPECT_TRUE((a)->Equals(b)) << "expected type: " << (a)->ToString() \
                               << " actual type: " << (b)->ToString()
 
-std::shared_ptr<Configuration> TestConfiguration() {
+static inline std::shared_ptr<Configuration> TestConfiguration() {
   auto builder = ConfigurationBuilder();
   return builder.DefaultConfiguration();
 }
 
 }  // namespace gandiva
-
-#endif  // GANDIVA_TEST_UTIL_H

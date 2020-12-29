@@ -64,7 +64,7 @@ import (
 
 	"github.com/apache/arrow/go/arrow/ipc"
 	"github.com/apache/arrow/go/arrow/memory"
-	"github.com/pkg/errors"
+	"golang.org/x/xerrors"
 )
 
 func main() {
@@ -86,23 +86,26 @@ func main() {
 }
 
 func processStream(w io.Writer, rin io.Reader) error {
-	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
-	defer mem.AssertSize(nil, 0)
-
-	r, err := ipc.NewReader(rin, ipc.WithAllocator(mem))
-	if err != nil {
-		return err
-	}
-	defer r.Release()
-
-	n := 0
-	for r.Next() {
-		n++
-		fmt.Fprintf(w, "record %d...\n", n)
-		rec := r.Record()
-		for i, col := range rec.Columns() {
-			fmt.Fprintf(w, "  col[%d] %q: %v\n", i, rec.ColumnName(i), col)
+	mem := memory.NewGoAllocator()
+	for {
+		r, err := ipc.NewReader(rin, ipc.WithAllocator(mem))
+		if err != nil {
+			if xerrors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		}
+
+		n := 0
+		for r.Next() {
+			n++
+			fmt.Fprintf(w, "record %d...\n", n)
+			rec := r.Record()
+			for i, col := range rec.Columns() {
+				fmt.Fprintf(w, "  col[%d] %q: %v\n", i, rec.ColumnName(i), col)
+			}
+		}
+		r.Release()
 	}
 	return nil
 }
@@ -128,7 +131,7 @@ func processFile(w io.Writer, fname string) error {
 	hdr := make([]byte, len(ipc.Magic))
 	_, err = io.ReadFull(f, hdr)
 	if err != nil {
-		return errors.Errorf("could not read file header: %v", err)
+		return xerrors.Errorf("could not read file header: %w", err)
 	}
 	f.Seek(0, io.SeekStart)
 
@@ -137,11 +140,13 @@ func processFile(w io.Writer, fname string) error {
 		return processStream(w, f)
 	}
 
-	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
-	defer mem.AssertSize(nil, 0)
+	mem := memory.NewGoAllocator()
 
 	r, err := ipc.NewFileReader(f, ipc.WithAllocator(mem))
 	if err != nil {
+		if xerrors.Is(err, io.EOF) {
+			return nil
+		}
 		return err
 	}
 	defer r.Close()
@@ -153,12 +158,13 @@ func processFile(w io.Writer, fname string) error {
 		if err != nil {
 			return err
 		}
-		defer rec.Release()
 
 		for i, col := range rec.Columns() {
 			fmt.Fprintf(w, "  col[%d] %q: %v\n", i, rec.ColumnName(i), col)
 		}
+		rec.Release()
 	}
+
 	return nil
 }
 

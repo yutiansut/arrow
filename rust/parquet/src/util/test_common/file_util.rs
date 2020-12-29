@@ -19,28 +19,22 @@ use std::{env, fs, io::Write, path::PathBuf, str::FromStr};
 
 /// Returns path to the test parquet file in 'data' directory
 pub fn get_test_path(file_name: &str) -> PathBuf {
-    let mut pathbuf = match env::var("PARQUET_TEST_DATA") {
-        Ok(path) => PathBuf::from_str(path.as_str()).unwrap(),
-        Err(_) => {
-            let mut pathbuf = env::current_dir().unwrap();
-            pathbuf.pop();
-            pathbuf.pop();
-            pathbuf
-                .push(PathBuf::from_str("cpp/submodules/parquet-testing/data").unwrap());
-            pathbuf
-        }
-    };
+    let mut pathbuf =
+        PathBuf::from_str(&arrow::util::test_util::parquet_test_data()).unwrap();
     pathbuf.push(file_name);
     pathbuf
 }
 
 /// Returns file handle for a test parquet file from 'data' directory
 pub fn get_test_file(file_name: &str) -> fs::File {
-    let file = fs::File::open(get_test_path(file_name).as_path());
-    if file.is_err() {
-        panic!("Test file {} not found", file_name)
-    }
-    file.unwrap()
+    let path = get_test_path(file_name);
+    fs::File::open(path.as_path()).unwrap_or_else(|err| {
+        panic!(
+            "Test file {} could not be opened, did you do `git submodule update`?: {}",
+            path.display(),
+            err
+        )
+    })
 }
 
 /// Returns file handle for a temp file in 'target' directory with a provided content
@@ -65,4 +59,15 @@ pub fn get_temp_file(file_name: &str, content: &[u8]) -> fs::File {
         .open(path_buf.as_path());
     assert!(file.is_ok());
     file.unwrap()
+}
+
+pub fn get_temp_filename() -> PathBuf {
+    let mut path_buf = env::current_dir().unwrap();
+    path_buf.push("target");
+    path_buf.push("debug");
+    path_buf.push("testdata");
+    fs::create_dir_all(&path_buf).unwrap();
+    path_buf.push(rand::random::<i16>().to_string());
+
+    path_buf
 }

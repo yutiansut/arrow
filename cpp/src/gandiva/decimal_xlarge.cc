@@ -24,13 +24,13 @@
 
 #include "gandiva/decimal_xlarge.h"
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include <limits>
 #include <vector>
-#include "boost/multiprecision/cpp_int.hpp"
 
 #include "arrow/util/basic_decimal.h"
+#include "arrow/util/logging.h"
 #include "gandiva/decimal_type_util.h"
-#include "gandiva/logging.h"
 
 #ifndef GANDIVA_UNIT_TEST
 #include "gandiva/engine.h"
@@ -82,6 +82,17 @@ void ExportedDecimalFunctions::AddMappings(Engine* engine) const {
 
   engine->AddGlobalMappingForFunc("gdv_xlarge_mod", types->void_type() /*return_type*/,
                                   args, reinterpret_cast<void*>(gdv_xlarge_mod));
+
+  // gdv_xlarge_compare
+  args = {types->i64_type(),   // int64_t x_high
+          types->i64_type(),   // uint64_t x_low
+          types->i32_type(),   // int32_t x_scale
+          types->i64_type(),   // int64_t y_high
+          types->i64_type(),   // uint64_t y_low
+          types->i32_type()};  // int32_t y_scale
+
+  engine->AddGlobalMappingForFunc("gdv_xlarge_compare", types->i32_type() /*return_type*/,
+                                  args, reinterpret_cast<void*>(gdv_xlarge_compare));
 }
 
 }  // namespace gandiva
@@ -246,6 +257,28 @@ void gdv_xlarge_mod(int64_t x_high, uint64_t x_low, int32_t x_scale, int64_t y_h
 
   *out_high = result.high_bits();
   *out_low = result.low_bits();
+}
+
+int32_t gdv_xlarge_compare(int64_t x_high, uint64_t x_low, int32_t x_scale,
+                           int64_t y_high, uint64_t y_low, int32_t y_scale) {
+  BasicDecimal128 x{x_high, x_low};
+  BasicDecimal128 y{y_high, y_low};
+
+  int256_t x_large = gandiva::internal::ConvertToInt256(x);
+  int256_t y_large = gandiva::internal::ConvertToInt256(y);
+  if (x_scale < y_scale) {
+    x_large = gandiva::internal::IncreaseScaleBy(x_large, y_scale - x_scale);
+  } else {
+    y_large = gandiva::internal::IncreaseScaleBy(y_large, x_scale - y_scale);
+  }
+
+  if (x_large == y_large) {
+    return 0;
+  } else if (x_large < y_large) {
+    return -1;
+  } else {
+    return 1;
+  }
 }
 
 }  // extern "C"

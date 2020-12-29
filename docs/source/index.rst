@@ -35,28 +35,48 @@ such topics as:
 .. _toc.columnar:
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Arrow Columnar Format
+   :maxdepth: 2
+   :caption: Specifications and Protocols
 
-   format/README
-   format/Guidelines
-   format/Layout
-   format/Metadata
-   format/IPC
+   format/Versioning
+   format/Columnar
+   format/Flight
+   format/Integration
+   format/CDataInterface
+   format/CStreamInterface
+   format/Other
 
 .. _toc.usage:
 
 .. toctree::
    :maxdepth: 2
-   :caption: Arrow Libraries
+   :caption: Libraries
 
-   cpp/index
-   python/index
+   status
+   C/GLib <https://arrow.apache.org/docs/c_glib/>
+   C++ <cpp/index>
+   C# <https://github.com/apache/arrow/blob/master/csharp/README.md>
+   Go <https://godoc.org/github.com/apache/arrow/go/arrow>
+   Java <java/index>
+   JavaScript <https://arrow.apache.org/docs/js/>
+   Julia <https://github.com/apache/arrow/blob/master/julia/Arrow/README.md>
+   MATLAB <https://github.com/apache/arrow/blob/master/matlab/README.md>
+   Python <python/index>
+   R <https://arrow.apache.org/docs/r/>
+   Ruby <https://github.com/apache/arrow/blob/master/ruby/README.md>
+   Rust <https://docs.rs/crate/arrow/>
 
 .. _toc.development:
 
 .. toctree::
    :maxdepth: 2
-   :caption: Development and Contributing
+   :caption: Development
 
-   developers/index
+   developers/contributing
+   developers/cpp/index
+   developers/python
+   developers/archery
+   developers/crossbow
+   developers/docker
+   developers/benchmarks
+   developers/documentation

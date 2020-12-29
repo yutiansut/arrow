@@ -20,7 +20,7 @@
 #include <memory>
 #include <string>
 
-#include "arrow/flight/protocol-internal.h"  // IWYU pragma: keep
+#include "arrow/flight/protocol_internal.h"  // IWYU pragma: keep
 #include "arrow/flight/types.h"
 #include "arrow/util/macros.h"
 
@@ -63,9 +63,39 @@ namespace flight {
 
 namespace internal {
 
-static const char* AUTH_HEADER = "auth-token-bin";
+/// The name of the header used to pass authentication tokens.
+ARROW_FLIGHT_EXPORT
+extern const char* kGrpcAuthHeader;
 
+/// The name of the header used to pass the exact Arrow status code.
+ARROW_FLIGHT_EXPORT
+extern const char* kGrpcStatusCodeHeader;
+
+/// The name of the header used to pass the exact Arrow status message.
+ARROW_FLIGHT_EXPORT
+extern const char* kGrpcStatusMessageHeader;
+
+/// The name of the header used to pass the exact Arrow status detail.
+ARROW_FLIGHT_EXPORT
+extern const char* kGrpcStatusDetailHeader;
+
+ARROW_FLIGHT_EXPORT
+extern const char* kBinaryErrorDetailsKey;
+
+ARROW_FLIGHT_EXPORT
 Status SchemaToString(const Schema& schema, std::string* out);
+
+/// Convert a gRPC status to an Arrow status. Optionally, provide a
+/// ClientContext to recover the exact Arrow status if it was passed
+/// over the wire.
+ARROW_FLIGHT_EXPORT
+Status FromGrpcStatus(const grpc::Status& grpc_status,
+                      grpc::ClientContext* ctx = nullptr);
+
+ARROW_FLIGHT_EXPORT
+grpc::Status ToGrpcStatus(const Status& arrow_status, grpc::ServerContext* ctx = nullptr);
+
+// These functions depend on protobuf types which are not exported in the Flight DLL.
 
 Status FromProto(const pb::ActionType& pb_type, ActionType* type);
 Status FromProto(const pb::Action& pb_action, Action* action);
@@ -78,17 +108,20 @@ Status FromProto(const pb::FlightData& pb_data, FlightDescriptor* descriptor,
 Status FromProto(const pb::FlightDescriptor& pb_descr, FlightDescriptor* descr);
 Status FromProto(const pb::FlightEndpoint& pb_endpoint, FlightEndpoint* endpoint);
 Status FromProto(const pb::FlightInfo& pb_info, FlightInfo::Data* info);
+Status FromProto(const pb::SchemaResult& pb_result, std::string* result);
+Status FromProto(const pb::BasicAuth& pb_basic_auth, BasicAuth* info);
 
 Status ToProto(const FlightDescriptor& descr, pb::FlightDescriptor* pb_descr);
 Status ToProto(const FlightInfo& info, pb::FlightInfo* pb_info);
 Status ToProto(const ActionType& type, pb::ActionType* pb_type);
 Status ToProto(const Action& action, pb::Action* pb_action);
 Status ToProto(const Result& result, pb::Result* pb_result);
+Status ToProto(const Criteria& criteria, pb::Criteria* pb_criteria);
+Status ToProto(const SchemaResult& result, pb::SchemaResult* pb_result);
 void ToProto(const Ticket& ticket, pb::Ticket* pb_ticket);
+Status ToProto(const BasicAuth& basic_auth, pb::BasicAuth* pb_basic_auth);
 
-Status FromGrpcStatus(const grpc::Status& grpc_status);
-
-grpc::Status ToGrpcStatus(const Status& arrow_status);
+Status ToPayload(const FlightDescriptor& descr, std::shared_ptr<Buffer>* out);
 
 }  // namespace internal
 }  // namespace flight

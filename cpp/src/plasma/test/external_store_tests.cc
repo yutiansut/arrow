@@ -22,22 +22,24 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <chrono>
-#include <random>
+#include <memory>
 #include <thread>
 
 #include <gtest/gtest.h>
 
 #include "arrow/testing/gtest_util.h"
+#include "arrow/util/io_util.h"
 
 #include "plasma/client.h"
 #include "plasma/common.h"
 #include "plasma/external_store.h"
 #include "plasma/plasma.h"
 #include "plasma/protocol.h"
-#include "plasma/test-util.h"
+#include "plasma/test_util.h"
 
 namespace plasma {
+
+using arrow::internal::TemporaryDir;
 
 std::string external_test_executable;  // NOLINT
 
@@ -52,21 +54,20 @@ class TestPlasmaStoreWithExternal : public ::testing::Test {
   // TODO(pcm): At the moment, stdout of the test gets mixed up with
   // stdout of the object store. Consider changing that.
   void SetUp() override {
-    uint64_t seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::mt19937 rng(static_cast<uint32_t>(seed));
-    std::string store_index = std::to_string(rng());
-    store_socket_name_ = "/tmp/store_with_external" + store_index;
+    ASSERT_OK_AND_ASSIGN(temp_dir_, TemporaryDir::Make("ext-test-"));
+    store_socket_name_ = temp_dir_->path().ToString() + "store";
 
     std::string plasma_directory =
         external_test_executable.substr(0, external_test_executable.find_last_of('/'));
     std::string plasma_command = plasma_directory +
-                                 "/plasma_store_server -m 1024000 -e " +
+                                 "/plasma-store-server -m 1024000 -e " +
                                  "hashtable://test -s " + store_socket_name_ +
                                  " 1> /tmp/log.stdout 2> /tmp/log.stderr & " +
                                  "echo $! > " + store_socket_name_ + ".pid";
     PLASMA_CHECK_SYSTEM(system(plasma_command.c_str()));
     ARROW_CHECK_OK(client_.Connect(store_socket_name_, ""));
   }
+
   void TearDown() override {
     ARROW_CHECK_OK(client_.Disconnect());
     // Kill plasma_store process that we started
@@ -85,6 +86,7 @@ class TestPlasmaStoreWithExternal : public ::testing::Test {
 
  protected:
   PlasmaClient client_;
+  std::unique_ptr<TemporaryDir> temp_dir_;
   std::string store_socket_name_;
 };
 
@@ -96,7 +98,7 @@ TEST_F(TestPlasmaStoreWithExternal, EvictionTest) {
     ObjectID object_id = random_object_id();
     object_ids.push_back(object_id);
 
-    // Test for object non-existence.
+    // Test for object nonexistence.
     bool has_object;
     ARROW_CHECK_OK(client_.Contains(object_id, &has_object));
     ASSERT_FALSE(has_object);

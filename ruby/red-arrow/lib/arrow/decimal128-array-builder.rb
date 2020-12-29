@@ -15,8 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-require "arrow/bigdecimal-extension"
-
 module Arrow
   class Decimal128ArrayBuilder
     class << self
@@ -36,7 +34,7 @@ module Arrow
       when Float
         value = Decimal128.new(value.to_s)
       when BigDecimal
-        value = value.to_arrow
+        value = Decimal128.new(value.to_s)
       end
       append_value_raw(value)
     end
